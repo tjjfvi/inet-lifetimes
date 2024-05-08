@@ -1,6 +1,6 @@
 #![feature(impl_trait_in_assoc_type, impl_trait_in_fn_trait_return)]
 
-use std::process::exit;
+use std::{fs, process::exit};
 
 use crate::{
   order::Order,
@@ -14,8 +14,9 @@ mod types;
 mod util;
 
 fn _main() -> Result<(), String> {
-  let ctx: Ctx = include_str!("../examples/nat.inlt").parse()?;
-  dbg!(&ctx);
+  let src = String::from_utf8(fs::read("./examples/nat.inlt").unwrap()).unwrap();
+
+  let ctx: Ctx = src.parse()?;
 
   let mut ty_order = Order::default();
 
@@ -23,7 +24,7 @@ fn _main() -> Result<(), String> {
     let cycles = agent.lt_ctx.order.find_cycles();
     agent.lt_ctx.order.cycle_error(
       cycles,
-      format_args!("impossible lifetime requirements in agent {}:", agent.name),
+      format_args!("impossible lifetime requirements in declaration of agent {}:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
 
@@ -32,7 +33,7 @@ fn _main() -> Result<(), String> {
     let pri = agent.ports[0];
     for aux in &agent.ports[1..] {
       if !aux.0 == pri.0 {
-        if aux.0.polarity() == Pos {
+        if pri.0.polarity() == Pos {
           required.relate_lt(aux.1, pri.1, false);
         } else {
           required.relate_lt(pri.1, aux.1, false);
@@ -41,11 +42,24 @@ fn _main() -> Result<(), String> {
         ty_order.relate_lt(!aux.0, pri.0, false);
       }
     }
+
+    required.cycle_error(
+      required.find_cycles(),
+      format_args!("agent {} requires impossible lifetime constraints:", agent.name),
+      agent.lt_ctx.show_lt(),
+    )?;
+
+    let diff = required.difference(&agent.lt_ctx.order);
+    diff.diff_error(
+      format_args!("agent {} requires constraints not present in declaration:", agent.name),
+      agent.lt_ctx.show_lt(),
+    )?;
   }
 
-  dbg!(&ty_order);
   let cycles = ty_order.find_cycles();
   ty_order.cycle_error(cycles, "found cycles in type order:", ctx.show_type())?;
+
+  println!("ok");
 
   Ok(())
 }

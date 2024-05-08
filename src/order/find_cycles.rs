@@ -5,13 +5,11 @@ use crate::{
   util::{Captures, DisplayFn},
 };
 
-use super::Order;
+use super::{Flag, Order};
 
 impl<I: Idx> Order<I> {
   pub fn find_cycles(&self) -> Vec<Vec<I>> {
-    for el in self.els.values() {
-      el.flag.take();
-    }
+    self.clear_flags();
     let mut finder =
       CycleFinder { order: self, finished_cycles: vec![], active_cycles_0: vec![], active_cycles_1: vec![] };
     for (a, _) in &self.els {
@@ -40,6 +38,23 @@ impl<I: Idx> Order<I> {
     }
   }
 
+  pub fn diff_error<D: Display>(
+    &self,
+    base_message: impl Display,
+    display_item: impl Fn(I) -> D,
+  ) -> Result<(), String> {
+    if self.els.values().any(|x| !x.rels.is_empty()) {
+      use std::fmt::Write;
+      let mut error = base_message.to_string();
+      for (a, b, eq) in self.iter() {
+        write!(&mut error, "\n  {} {} {}", display_item(a), show_relation(eq), display_item(b)).unwrap();
+      }
+      Err(error)
+    } else {
+      Ok(())
+    }
+  }
+
   pub fn show_cycle<'a, D: Display>(
     &'a self,
     cycle: Vec<I>,
@@ -52,8 +67,7 @@ impl<I: Idx> Order<I> {
       let mut last = None;
       for &b in &cycle {
         if let Some(a) = last {
-          let op = if self.els[a].rels[&b] { "<=" } else { "<" };
-          write!(f, " {op} ")?;
+          write!(f, " {} ", show_relation(self.els[a].rels[&b]))?;
         }
         write!(f, "{}", display_item(b))?;
         last = Some(b);
@@ -70,22 +84,12 @@ struct CycleFinder<'a, I: Idx> {
   active_cycles_1: Vec<Vec<I>>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CycleFlag {
-  #[default]
-  None,
-  Visiting {
-    strong_depth: usize,
-  },
-  Visited,
-}
-
 impl<'a, I: Idx> CycleFinder<'a, I> {
   fn visit(&mut self, a: I, strong_depth: usize) {
     let Some(el) = &self.order.els.get(a) else { return };
     match el.flag.get() {
-      CycleFlag::Visited => return,
-      CycleFlag::Visiting { strong_depth: previous_depth } => {
+      Flag::Done => return,
+      Flag::Cycle(previous_depth) => {
         if strong_depth > previous_depth {
           self.active_cycles_0.push(vec![a]);
         }
@@ -93,7 +97,7 @@ impl<'a, I: Idx> CycleFinder<'a, I> {
       }
       _ => {}
     }
-    el.flag.set(CycleFlag::Visiting { strong_depth });
+    el.flag.set(Flag::Cycle(strong_depth));
     std::mem::swap(&mut self.active_cycles_0, &mut self.active_cycles_1);
     let new_cycles_start = self.active_cycles_0.len();
     for (&b, &eq) in &el.rels {
@@ -108,7 +112,7 @@ impl<'a, I: Idx> CycleFinder<'a, I> {
         self.active_cycles_1.push(cycle);
       }
     }
-    el.flag.set(CycleFlag::Visited);
+    el.flag.set(Flag::Done);
     std::mem::swap(&mut self.active_cycles_0, &mut self.active_cycles_1);
   }
 }
@@ -184,5 +188,13 @@ fn test_extreme_cases() {
 
   fn every_node_represented(order: &Order<usize>, cycles: &Vec<Vec<usize>>) -> bool {
     order.els.iter().all(|(a, _)| cycles.iter().any(|cycle| cycle.contains(&a)))
+  }
+}
+
+fn show_relation(eq: bool) -> &'static str {
+  if eq {
+    "<="
+  } else {
+    "<"
   }
 }

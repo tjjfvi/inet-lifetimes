@@ -1,11 +1,10 @@
+mod complete;
 mod find_cycles;
 
 use std::{cell::Cell, fmt::Debug};
 
 use crate::index_vec::{Idx, IndexVec};
 use nohash_hasher::IntMap;
-
-use self::find_cycles::CycleFlag;
 
 #[derive(Clone)]
 pub struct Order<I: Idx> {
@@ -15,7 +14,15 @@ pub struct Order<I: Idx> {
 #[derive(Clone)]
 struct Element<I: Idx> {
   rels: IntMap<I, bool>,
-  flag: Cell<CycleFlag>,
+  flag: Cell<Flag>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Flag {
+  #[default]
+  None,
+  Cycle(usize),
+  Done,
 }
 
 impl<I: Idx> Default for Order<I> {
@@ -64,12 +71,20 @@ impl<I: Idx> Order<I> {
       *self.els.get_or_extend(a).rels.entry(b).or_insert(true) &= eq;
     }
   }
+
   pub fn import<J: Idx>(&mut self, from: &Order<J>, f: impl Fn(J) -> I) {
     for (a, b, eq) in from.iter() {
       self.relate_lt(f(a), f(b), eq);
     }
   }
+
   pub fn iter(&self) -> impl Iterator<Item = (I, I, bool)> + '_ {
     self.els.iter().flat_map(|(a, el)| el.rels.iter().map(move |(&b, &eq)| (a, b, eq)))
+  }
+
+  fn clear_flags(&self) {
+    for el in self.els.values() {
+      el.flag.take();
+    }
   }
 }
