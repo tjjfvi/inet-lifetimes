@@ -2,7 +2,10 @@
 
 use std::process::exit;
 
-use crate::{order::Order, types::Ctx};
+use crate::{
+  order::Order,
+  types::{Ctx, Pos},
+};
 
 mod index_vec;
 mod order;
@@ -17,12 +20,26 @@ fn _main() -> Result<(), String> {
   let mut ty_order = Order::default();
 
   for agent in &ctx.agents {
+    let cycles = agent.lt_ctx.order.find_cycles();
+    agent.lt_ctx.order.cycle_error(
+      cycles,
+      format_args!("impossible lifetime requirements in agent {}:", agent.name),
+      agent.lt_ctx.show_lt(),
+    )?;
+
+    let mut required = Order::default();
+
     let pri = agent.ports[0];
     for aux in &agent.ports[1..] {
-      if pri.0 == !aux.0 {
-        continue;
+      if !aux.0 == pri.0 {
+        if aux.0.polarity() == Pos {
+          required.relate_lt(aux.1, pri.1, false);
+        } else {
+          required.relate_lt(pri.1, aux.1, false);
+        }
+      } else {
+        ty_order.relate_lt(!aux.0, pri.0, false);
       }
-      ty_order.relate_lt(!aux.0, pri.0, false);
     }
   }
 

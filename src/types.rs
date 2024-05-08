@@ -1,8 +1,4 @@
-use nohash_hasher::IntMap;
-use std::{
-  fmt::{Debug, Display},
-  ops::Not,
-};
+use std::{fmt::Debug, ops::Not};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Polarity {
@@ -21,7 +17,7 @@ impl Debug for Polarity {
 
 pub use Polarity::*;
 
-use crate::{index_vec::IndexVec, new_index, order::Order, util::Captures};
+use crate::{index_vec::IndexVec, new_index, order::Order};
 
 impl Not for Polarity {
   type Output = Polarity;
@@ -41,7 +37,7 @@ impl Debug for Type {
 }
 
 impl Type {
-  fn polarity(&self) -> Polarity {
+  pub fn polarity(&self) -> Polarity {
     match self.0 & 1 {
       0 => Pos,
       _ => Neg,
@@ -108,6 +104,10 @@ pub struct LifetimeCtx {
 impl LifetimeCtx {
   pub fn intro(&mut self, name: String) -> Lifetime {
     self.lifetimes.push(LifetimeInfo { name })
+  }
+
+  pub fn show_lt<'a>(&'a self) -> impl Fn(Lifetime) -> &'a str {
+    |lt| &self.lifetimes[lt].name
   }
 }
 

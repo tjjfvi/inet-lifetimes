@@ -25,12 +25,12 @@ impl<I: Idx> Order<I> {
   pub fn cycle_error<D: Display>(
     &self,
     cycles: Vec<Vec<I>>,
-    base_message: &str,
+    base_message: impl Display,
     display_item: impl Fn(I) -> D,
   ) -> Result<(), String> {
     if !cycles.is_empty() {
       use std::fmt::Write;
-      let mut error = base_message.to_owned();
+      let mut error = base_message.to_string();
       for cycle in cycles {
         write!(&mut error, "\n  {}", self.show_cycle(cycle, &display_item)).unwrap();
       }
