@@ -3,7 +3,10 @@ mod find_cycles;
 
 use std::{cell::Cell, fmt::Debug};
 
-use crate::index_vec::{Idx, IndexVec};
+use crate::{
+  index_vec::{Idx, IndexVec},
+  types::Polarity,
+};
 use nohash_hasher::IntMap;
 
 #[derive(Clone)]
@@ -69,6 +72,13 @@ impl<I: Idx> Order<I> {
     // don't record `a <= a`
     if !(a == b && eq) {
       *self.els.get_or_extend(a).rels.entry(b).or_insert(true) &= eq;
+    }
+  }
+
+  pub fn relate_polarity(&mut self, a: I, b: I, eq: bool, polarity: Polarity) {
+    match polarity {
+      Polarity::Pos => self.relate_lt(a, b, eq),
+      Polarity::Neg => self.relate_lt(b, a, eq),
     }
   }
 

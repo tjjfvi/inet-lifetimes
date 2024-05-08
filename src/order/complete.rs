@@ -7,7 +7,8 @@ use super::{Flag, Order};
 impl<I: Idx> Order<I> {
   pub fn complete(&self) -> Order<I> {
     self.clear_flags();
-    let mut completionist = Completionist { source: self, output: Order::default() };
+    let mut completionist =
+      Completionist { source: self, output: Order::default(), interesting: I::from(0), cutoff: I::from(usize::MAX) };
     for (a, _) in &self.els {
       completionist.visit(a, Some(0));
     }
@@ -16,7 +17,8 @@ impl<I: Idx> Order<I> {
 
   pub fn difference(&self, other: &Order<I>) -> Order<I> {
     other.clear_flags();
-    let mut completionist = Completionist { source: other, output: Order::default() };
+    let mut completionist =
+      Completionist { source: other, output: Order::default(), interesting: I::from(0), cutoff: I::from(usize::MAX) };
 
     let mut diff = Order::default();
     for (a, b, eq) in self.iter() {
@@ -31,6 +33,16 @@ impl<I: Idx> Order<I> {
     diff
   }
 
+  pub fn truncate(&self, cutoff: I) -> Order<I> {
+    self.clear_flags();
+    let mut completionist = Completionist { source: self, output: Order::default(), interesting: cutoff, cutoff };
+    for (a, _) in self.els.iter().take(cutoff.into()) {
+      completionist.visit(a, Some(0));
+    }
+    completionist.output.els.truncate(cutoff);
+    completionist.output
+  }
+
   fn has(&self, a: I, b: I, eq: bool) -> bool {
     self.els.get(a).and_then(|x| x.rels.get(&b)).is_some_and(|self_eq| !self_eq || eq)
   }
@@ -39,6 +51,8 @@ impl<I: Idx> Order<I> {
 struct Completionist<'a, I: Idx> {
   source: &'a Order<I>,
   output: Order<I>,
+  interesting: I,
+  cutoff: I,
 }
 
 impl<'a, I: Idx> Completionist<'a, I> {
@@ -54,7 +68,9 @@ impl<'a, I: Idx> Completionist<'a, I> {
     let mut head_depth = usize::MAX;
 
     for (&b, _) in &el.rels {
-      head_depth = head_depth.min(self.visit(b, depth.map(|x| x + 1)));
+      if b >= self.interesting {
+        head_depth = head_depth.min(self.visit(b, depth.map(|x| x + 1)));
+      }
     }
 
     if depth.is_some_and(|x| x > head_depth) {
@@ -62,10 +78,14 @@ impl<'a, I: Idx> Completionist<'a, I> {
     } else {
       let mut rels = IntMap::default();
       for (&b, &eq_0) in &el.rels {
-        rels.insert(b, eq_0);
-        if let Some(other) = self.output.els.get(b) {
-          for (&c, &eq_1) in &other.rels {
-            rels.insert(c, eq_0 && eq_1);
+        if b < self.cutoff {
+          rels.insert(b, eq_0);
+        }
+        if b >= self.interesting {
+          if let Some(other) = self.output.els.get(b) {
+            for (&c, &eq_1) in &other.rels {
+              rels.insert(c, eq_0 && eq_1);
+            }
           }
         }
       }

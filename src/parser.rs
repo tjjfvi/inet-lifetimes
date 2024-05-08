@@ -11,6 +11,7 @@ struct Parser<'i> {
   type_lookup: HashMap<String, Type>,
   lt_lookup: HashMap<String, Lifetime>,
   agent_lookup: HashMap<String, Agent>,
+  vars_lookup: HashMap<String, Var>,
 }
 
 impl<'i> TSPL::Parser<'i> for Parser<'i> {
@@ -40,8 +41,10 @@ impl<'i> Parser<'i> {
       self.parse_type_decl(ctx)
     } else if self.peek_many(5) == Some("agent") {
       self.parse_agent_decl(ctx)
+    } else if self.peek_many(4) == Some("rule") {
+      self.parse_rule_decl(ctx)
     } else {
-      self.expected("type or agent decl")
+      self.expected("type, agent, or rule declaration")
     }
   }
 
@@ -70,10 +73,42 @@ impl<'i> Parser<'i> {
     self.consume("agent")?;
     let lt_ctx = self.parse_lt_ctx()?;
     let (name, ports) = self.parse_node_like(Self::parse_port_label)?;
-    let agent = Agent(ctx.agents.len());
-    self.agent_lookup.insert(name.clone(), agent);
-    ctx.agents.push(AgentInfo { name, lt_ctx, ports });
+    let agent = ctx.agents.push(AgentInfo { name: name.clone(), lt_ctx, ports });
+    self.agent_lookup.insert(name, agent);
     Ok(())
+  }
+
+  fn parse_rule_decl(&mut self, ctx: &mut Ctx) -> Result<(), String> {
+    self.consume("rule")?;
+    self.vars_lookup.clear();
+    let mut var_ctx = VarCtx::default();
+    let a = self.parse_node(ctx, &mut var_ctx)?;
+    let b = self.parse_node(ctx, &mut var_ctx)?;
+    let result = self.parse_net(ctx, &mut var_ctx)?;
+    ctx.rules.push(RuleInfo { var_ctx, a, b, result });
+    Ok(())
+  }
+
+  fn parse_node(&mut self, ctx: &mut Ctx, var_ctx: &mut VarCtx) -> Result<Node, String> {
+    self.skip_trivia();
+    let name_start = self.index;
+    let (name, ports) = self.parse_node_like(|slf| slf.parse_var(var_ctx))?;
+    let span = || highlight_error(name_start, name_start + name.len(), self.input);
+    let Some(&agent) = self.agent_lookup.get(&name) else { Err(format!("unknown agent `{name}`:\n{}", span()))? };
+    let expected_len = ctx.agents[agent].ports.len();
+    if ports.len() != expected_len {
+      Err(format!("expected {expected_len} ports, found {}:\n{}", ports.len(), span()))?
+    }
+    Ok(Node { agent, ports })
+  }
+
+  fn parse_net(&mut self, ctx: &mut Ctx, var_ctx: &mut VarCtx) -> Result<Vec<Node>, String> {
+    self.consume("{")?;
+    let mut nodes = vec![];
+    while !self.try_consume("}") {
+      nodes.push(self.parse_node(ctx, var_ctx)?);
+    }
+    Ok(nodes)
   }
 
   fn parse_port_label(&mut self) -> Result<PortLabel, String> {
@@ -138,6 +173,11 @@ impl<'i> Parser<'i> {
     Ok(lt_ctx)
   }
 
+  fn parse_var(&mut self, var_ctx: &mut VarCtx) -> Result<Var, String> {
+    let name = self.parse_name()?;
+    Ok(*self.vars_lookup.entry(name).or_insert_with_key(|name| var_ctx.vars.push(VarInfo { name: name.clone() })))
+  }
+
   fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx) -> Result<Lifetime, String> {
     let name = self.parse_lt_name()?;
     Ok(*self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"))))
@@ -182,6 +222,7 @@ impl FromStr for Ctx {
       type_lookup: Default::default(),
       lt_lookup: Default::default(),
       agent_lookup: Default::default(),
+      vars_lookup: Default::default(),
     }
     .parse_file()
   }

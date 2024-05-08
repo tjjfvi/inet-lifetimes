@@ -46,6 +46,12 @@ impl<I: Idx, T> IndexVec<I, T> {
     self.vec.push(value);
     index
   }
+  pub fn len(&self) -> I {
+    I::from(self.vec.len())
+  }
+  pub fn truncate(&mut self, max_len: I) {
+    self.vec.truncate(max_len.into())
+  }
   pub fn get(&self, index: I) -> Option<&T> {
     self.vec.get(index.into())
   }

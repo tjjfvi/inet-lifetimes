@@ -2,7 +2,6 @@
 type Nat: +
 
 agent['a] Zero(Nat'a)
-
 agent['a < 'b] Succ(Nat'b, !Nat'a)
 
 agent['a] Era(!Nat'a)
@@ -10,3 +9,38 @@ agent['a < 'b] Dup(!Nat'a, Nat'b, Nat'b)
 
 agent['a < 'b] Add(!Nat'a, !Nat'a, Nat'b)
 agent['a < 'b] Mul(!Nat'a, !Nat'a, Nat'b)
+
+rule Zero(_) Era(_) {}
+
+rule Succ(_, pred) Era(_) {
+  Era(pred)
+}
+
+rule Zero(_) Dup(_, a, b) {
+  Zero(a)
+  Zero(b)
+}
+
+rule Succ(_, pred) Dup(_, a, b) {
+  Succ(a, p)
+  Succ(b, q)
+  Dup(pred, p, q)
+}
+
+rule Zero(_) Add(_, x, x) {}
+
+rule Succ(_, n) Add(_, m, out) {
+  Succ(out, o)
+  Add(n, m, o)
+}
+
+rule Zero(_) Mul(_, n, o) {
+  Zero(o)
+  Era(n)
+}
+
+rule Succ(_, n) Mul(_, m, out) {
+  Dup(m, m1, m2)
+  Mul(n, m1, x)
+  Add(m2, x, out)
+}
