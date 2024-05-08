@@ -1,11 +1,11 @@
 #![feature(impl_trait_in_assoc_type, impl_trait_in_fn_trait_return)]
 
-use std::{env, fs, process::exit};
+use std::{env, fmt::Display, fs, process::exit};
 
 use crate::{
   index_vec::IndexVec,
   order::Order,
-  types::{Ctx, Lifetime, LifetimeCtx, PortLabel, Pos, Var},
+  types::{Ctx, Lifetime, LifetimeCtx, PortLabel, Var},
   util::DisplayFn,
 };
 
@@ -15,15 +15,14 @@ mod parser;
 mod types;
 mod util;
 
-fn _main() -> Result<(), String> {
-  let path = env::args().skip(1).next().ok_or_else(|| format!("must supply path"))?;
+fn _main(path: &str) -> Result<(), String> {
   let src = String::from_utf8(fs::read(path).unwrap()).unwrap();
   let mut ctx: Ctx = src.parse()?;
 
   let mut ty_order = Order::default();
 
   for agent in ctx.agents.values_mut() {
-    agent.lt_ctx.full_order.cycle_error(
+    agent.lt_ctx.full_order.verify_acyclic(
       format_args!("impossible lifetime requirements in declaration of agent {}:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
@@ -39,24 +38,17 @@ fn _main() -> Result<(), String> {
       }
     }
 
-    required.cycle_error(
+    agent.lt_ctx.verify_implication(
+      &agent.lt_ctx.full_order,
+      &required,
       format_args!("validity of agent {} would require impossible lifetime constraints:", agent.name),
-      agent.lt_ctx.show_lt(),
-    )?;
-
-    let diff = required.difference(&agent.lt_ctx.full_order);
-    diff.diff_error(
       format_args!("validity of agent {} requires constraints not present in declaration:", agent.name),
-      agent.lt_ctx.show_lt(),
     )?;
 
-    let known = agent.lt_ctx.full_order.omit(&|lt| !agent.lt_ctx.lifetimes[lt].fixed);
-    agent.lt_ctx.needs_order = agent.lt_ctx.needs_order.difference(&known);
-    agent.lt_ctx.known_order = known;
+    agent.lt_ctx.split_full_order();
   }
 
-  let cycles = ty_order.find_cycles();
-  ty_order.cycle_error("found cycles in type order:", ctx.show_type())?;
+  ty_order.verify_acyclic("found cycles in type order:", ctx.show_type())?;
 
   for rule in &ctx.rules {
     let a = &ctx.agents[rule.a.agent];
@@ -114,29 +106,51 @@ fn _main() -> Result<(), String> {
       Err(format!("type errors in rule {rule_name}:{var_count_errors}"))?
     }
 
-    let known = &lt_ctx.known_order;
-    let needs = &lt_ctx.needs_order;
-
-    needs.cycle_error(
+    lt_ctx.verify_implication(
+      &lt_ctx.known_order,
+      &lt_ctx.needs_order,
       format_args!("validity of rule {rule_name} would require impossible lifetime constraints:"),
-      lt_ctx.show_lt(),
-    )?;
-
-    let diff = needs.omit(&|lt| !lt_ctx.lifetimes[lt].fixed).difference(&known);
-    diff.diff_error(
       format_args!("validity of rule {rule_name} would require constraints not guaranteed by agents:"),
-      lt_ctx.show_lt(),
     )?;
   }
-
-  println!("ok");
 
   Ok(())
 }
 
+impl LifetimeCtx {
+  fn split_full_order(&mut self) {
+    self.known_order = self.full_order.omit(&|lt| !self.lifetimes[lt].fixed);
+    self.needs_order = self.needs_order.difference(&self.known_order);
+  }
+
+  fn verify_implication(
+    &self,
+    knows: &Order<Lifetime>,
+    needs: &Order<Lifetime>,
+    cycle_message: impl Display,
+    diff_message: impl Display,
+  ) -> Result<(), String> {
+    needs.verify_acyclic(cycle_message, self.show_lt())?;
+
+    let diff = needs.omit(&|lt| !self.lifetimes[lt].fixed).difference(&knows);
+    diff.verify_empty(diff_message, self.show_lt())?;
+
+    Ok(())
+  }
+}
+
 fn main() {
-  if let Err(e) = _main() {
-    println!("{}", e);
-    exit(1);
+  let mut any = false;
+  for path in env::args().skip(1) {
+    any = true;
+    if let Err(e) = _main(&path) {
+      println!("{path}: {}", e);
+      exit(1);
+    } else {
+      println!("{path}: ok")
+    }
+  }
+  if !any {
+    println!("supply a path")
   }
 }

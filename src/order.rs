@@ -1,11 +1,15 @@
 mod complete;
 mod find_cycles;
 
-use std::{cell::Cell, fmt::Debug};
+use std::{
+  cell::Cell,
+  fmt::{Debug, Display},
+};
 
 use crate::{
   index_vec::{Idx, IndexVec},
   types::Polarity,
+  util::{Captures, DisplayFn},
 };
 use nohash_hasher::IntMap;
 
@@ -96,5 +100,69 @@ impl<I: Idx> Order<I> {
     for el in self.els.values() {
       el.flag.take();
     }
+  }
+
+  pub fn verify_empty<D: Display>(
+    &self,
+    base_message: impl Display,
+    display_item: impl Fn(I) -> D,
+  ) -> Result<(), String> {
+    if self.els.values().any(|x| !x.rels.is_empty()) {
+      use std::fmt::Write;
+      let mut error = base_message.to_string();
+      for (a, b, eq) in self.iter() {
+        write!(&mut error, "\n  {} {} {}", display_item(a), show_relation(eq), display_item(b)).unwrap();
+      }
+      Err(error)
+    } else {
+      Ok(())
+    }
+  }
+
+  pub fn verify_acyclic<D: Display>(
+    &self,
+    base_message: impl Display,
+    display_item: impl Fn(I) -> D,
+  ) -> Result<(), String> {
+    let cycles = self.find_cycles();
+    if !cycles.is_empty() {
+      use std::fmt::Write;
+      let mut error = base_message.to_string();
+      for cycle in cycles {
+        write!(&mut error, "\n  {}", self.show_cycle(cycle, &display_item)).unwrap();
+      }
+      Err(error)
+    } else {
+      Ok(())
+    }
+  }
+
+  pub fn show_cycle<'a, D: Display>(
+    &'a self,
+    cycle: Vec<I>,
+    display_item: impl Fn(I) -> D,
+  ) -> impl Display + Captures<&'a ()>
+  where
+    I: 'a,
+  {
+    DisplayFn(move |f| {
+      let mut last = None;
+      for &b in &cycle {
+        if let Some(a) = last {
+          write!(f, " {} ", show_relation(self.els[a].rels[&b]))?;
+        }
+        write!(f, "{}", display_item(b))?;
+        last = Some(b);
+      }
+      Ok(())
+    })
+  }
+}
+
+fn show_relation(eq: bool) -> &'static str {
+  if eq {
+    "<="
+  } else {
+    "<"
   }
 }

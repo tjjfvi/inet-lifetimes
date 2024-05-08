@@ -1,9 +1,4 @@
-use std::fmt::Display;
-
-use crate::{
-  index_vec::Idx,
-  util::{Captures, DisplayFn},
-};
+use crate::index_vec::Idx;
 
 use super::{Flag, Order};
 
@@ -18,62 +13,6 @@ impl<I: Idx> Order<I> {
     debug_assert!(finder.active_cycles_0.len() == 0);
     debug_assert!(finder.active_cycles_1.len() == 0);
     finder.finished_cycles
-  }
-
-  pub fn cycle_error<D: Display>(
-    &self,
-    base_message: impl Display,
-    display_item: impl Fn(I) -> D,
-  ) -> Result<(), String> {
-    let cycles = self.find_cycles();
-    if !cycles.is_empty() {
-      use std::fmt::Write;
-      let mut error = base_message.to_string();
-      for cycle in cycles {
-        write!(&mut error, "\n  {}", self.show_cycle(cycle, &display_item)).unwrap();
-      }
-      Err(error)
-    } else {
-      Ok(())
-    }
-  }
-
-  pub fn diff_error<D: Display>(
-    &self,
-    base_message: impl Display,
-    display_item: impl Fn(I) -> D,
-  ) -> Result<(), String> {
-    if self.els.values().any(|x| !x.rels.is_empty()) {
-      use std::fmt::Write;
-      let mut error = base_message.to_string();
-      for (a, b, eq) in self.iter() {
-        write!(&mut error, "\n  {} {} {}", display_item(a), show_relation(eq), display_item(b)).unwrap();
-      }
-      Err(error)
-    } else {
-      Ok(())
-    }
-  }
-
-  pub fn show_cycle<'a, D: Display>(
-    &'a self,
-    cycle: Vec<I>,
-    display_item: impl Fn(I) -> D,
-  ) -> impl Display + Captures<&'a ()>
-  where
-    I: 'a,
-  {
-    DisplayFn(move |f| {
-      let mut last = None;
-      for &b in &cycle {
-        if let Some(a) = last {
-          write!(f, " {} ", show_relation(self.els[a].rels[&b]))?;
-        }
-        write!(f, "{}", display_item(b))?;
-        last = Some(b);
-      }
-      Ok(())
-    })
   }
 }
 
@@ -188,13 +127,5 @@ fn test_extreme_cases() {
 
   fn every_node_represented(order: &Order<usize>, cycles: &Vec<Vec<usize>>) -> bool {
     order.els.iter().all(|(a, _)| cycles.iter().any(|cycle| cycle.contains(&a)))
-  }
-}
-
-fn show_relation(eq: bool) -> &'static str {
-  if eq {
-    "<="
-  } else {
-    "<"
   }
 }
