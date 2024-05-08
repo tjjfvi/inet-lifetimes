@@ -1,0 +1,12 @@
+
+type Nat: +
+
+agent['a] Zero(Nat'a)
+
+agent['a < 'b] Succ(Nat'b, !Nat'a)
+
+agent['a] Era(!Nat'a)
+agent['a < 'b] Dup(!Nat'a, Nat'b, Nat'b)
+
+agent['a < 'b] Add(!Nat'a, !Nat'a, Nat'b)
+agent['a < 'b] Mul(!Nat'a, !Nat'a, Nat'b)
