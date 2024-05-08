@@ -103,6 +103,7 @@ pub struct AgentInfo {
 #[derive(Debug, Clone)]
 pub struct LifetimeInfo {
   pub name: String,
+  pub fixed: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -132,24 +133,29 @@ pub struct RuleInfo {
 #[derive(Debug, Clone, Default)]
 pub struct LifetimeCtx {
   pub lifetimes: IndexVec<Lifetime, LifetimeInfo>,
-  pub order: Order<Lifetime>,
+  pub full_order: Order<Lifetime>,
+  pub known_order: Order<Lifetime>,
+  pub needs_order: Order<Lifetime>,
 }
 
 impl LifetimeCtx {
-  pub fn intro(&mut self, name: String) -> Lifetime {
-    self.lifetimes.push(LifetimeInfo { name })
+  pub fn intro(&mut self, name: String, fixed: bool) -> Lifetime {
+    self.lifetimes.push(LifetimeInfo { name, fixed })
   }
 
   pub fn show_lt<'a>(&'a self) -> impl Fn(Lifetime) -> &'a str {
     |lt| &self.lifetimes[lt].name
   }
 
-  pub fn import(&mut self, from: &LifetimeCtx, prefix: impl Display) -> Lifetime {
+  pub fn import(&mut self, from: &LifetimeCtx, invert: bool, prefix: impl Display) -> Lifetime {
     let base = self.lifetimes.len();
     for lt in from.lifetimes.values() {
-      self.lifetimes.push(LifetimeInfo { name: format!("'{prefix}{}", &lt.name[1..]) });
+      self.lifetimes.push(LifetimeInfo { name: format!("'{prefix}{}", &lt.name[1..]), fixed: lt.fixed ^ invert });
     }
-    self.order.import(&from.order, |lt| base + lt);
+    let (known, needs) =
+      if invert { (&from.needs_order, &from.known_order) } else { (&from.known_order, &from.needs_order) };
+    self.known_order.import(known, |lt| base + lt);
+    self.needs_order.import(needs, |lt| base + lt);
     base
   }
 }

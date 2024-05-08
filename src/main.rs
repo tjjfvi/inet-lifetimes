@@ -18,14 +18,12 @@ mod util;
 fn _main() -> Result<(), String> {
   let path = env::args().skip(1).next().ok_or_else(|| format!("must supply path"))?;
   let src = String::from_utf8(fs::read(path).unwrap()).unwrap();
-  let ctx: Ctx = src.parse()?;
+  let mut ctx: Ctx = src.parse()?;
 
   let mut ty_order = Order::default();
 
-  for agent in ctx.agents.values() {
-    let cycles = agent.lt_ctx.order.find_cycles();
-    agent.lt_ctx.order.cycle_error(
-      cycles,
+  for agent in ctx.agents.values_mut() {
+    agent.lt_ctx.full_order.cycle_error(
       format_args!("impossible lifetime requirements in declaration of agent {}:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
@@ -42,20 +40,23 @@ fn _main() -> Result<(), String> {
     }
 
     required.cycle_error(
-      required.find_cycles(),
-      format_args!("agent {} requires impossible lifetime constraints:", agent.name),
+      format_args!("validity of agent {} would require impossible lifetime constraints:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
 
-    let diff = required.difference(&agent.lt_ctx.order);
+    let diff = required.difference(&agent.lt_ctx.full_order);
     diff.diff_error(
-      format_args!("agent {} requires constraints not present in declaration:", agent.name),
+      format_args!("validity of agent {} requires constraints not present in declaration:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
+
+    let known = agent.lt_ctx.full_order.omit(&|lt| !agent.lt_ctx.lifetimes[lt].fixed);
+    agent.lt_ctx.needs_order = agent.lt_ctx.needs_order.difference(&known);
+    agent.lt_ctx.known_order = known;
   }
 
   let cycles = ty_order.find_cycles();
-  ty_order.cycle_error(cycles, "found cycles in type order:", ctx.show_type())?;
+  ty_order.cycle_error("found cycles in type order:", ctx.show_type())?;
 
   for rule in &ctx.rules {
     let a = &ctx.agents[rule.a.agent];
@@ -66,11 +67,9 @@ fn _main() -> Result<(), String> {
     }
 
     let mut lt_ctx = LifetimeCtx::default();
-    let a_base = lt_ctx.import(&a.lt_ctx, format_args!("{}.", a.name));
-    let b_base = lt_ctx.import(&b.lt_ctx, format_args!("{}.", b.name));
-    lt_ctx.order.relate_polarity(a_base + a.ports[0].1, b_base + b.ports[0].1, true, a.ports[0].0.polarity());
-
-    let known = std::mem::take(&mut lt_ctx.order);
+    let a_base = lt_ctx.import(&a.lt_ctx, false, format_args!("{}.", a.name));
+    let b_base = lt_ctx.import(&b.lt_ctx, false, format_args!("{}.", b.name));
+    lt_ctx.known_order.relate_polarity(a_base + a.ports[0].1, b_base + b.ports[0].1, true, a.ports[0].0.polarity());
 
     let mut var_uses = IndexVec::<Var, Vec<PortLabel>>::default();
 
@@ -80,9 +79,8 @@ fn _main() -> Result<(), String> {
       }
     }
 
-    let fresh_base = lt_ctx.lifetimes.len();
     for (i, node) in rule.result.iter().enumerate() {
-      let lt_base = lt_ctx.import(&ctx.agents[node.agent].lt_ctx, format_args!("{i}."));
+      let lt_base = lt_ctx.import(&ctx.agents[node.agent].lt_ctx, true, format_args!("{i}."));
       for (&var, &label) in node.ports.iter().zip(&ctx.agents[node.agent].ports) {
         var_uses.get_or_extend(var).push(PortLabel(label.0, lt_base + label.1));
       }
@@ -107,26 +105,28 @@ fn _main() -> Result<(), String> {
           )
           .unwrap();
         } else {
-          lt_ctx.order.relate_polarity(a.1, b.1, true, a.0.polarity());
+          lt_ctx.needs_order.relate_polarity(a.1, b.1, true, a.0.polarity());
         }
       }
     }
 
     if !var_count_errors.is_empty() {
-      Err(format!("not all vars used twice in rule {rule_name}:{var_count_errors}"))?
+      Err(format!("type errors in rule {rule_name}:{var_count_errors}"))?
     }
 
-    let required = &lt_ctx.order;
+    let known = &lt_ctx.known_order;
+    let needs = &lt_ctx.needs_order;
 
-    required.cycle_error(
-      required.find_cycles(),
-      format_args!("rule {rule_name} requires impossible lifetime constraints:"),
+    needs.cycle_error(
+      format_args!("validity of rule {rule_name} would require impossible lifetime constraints:"),
       lt_ctx.show_lt(),
     )?;
 
-    let diff = required.truncate(fresh_base).difference(&known);
-    diff
-      .diff_error(format_args!("rule {rule_name} requires constraints not guaranteed by agents:"), lt_ctx.show_lt())?;
+    let diff = needs.omit(&|lt| !lt_ctx.lifetimes[lt].fixed).difference(&known);
+    diff.diff_error(
+      format_args!("validity of rule {rule_name} would require constraints not guaranteed by agents:"),
+      lt_ctx.show_lt(),
+    )?;
   }
 
   println!("ok");

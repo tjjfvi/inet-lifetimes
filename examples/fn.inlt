@@ -1,0 +1,9 @@
+
+type T: +
+type Fn: +
+
+agent['f < 'i? < 'o?] Lam(Fn'f, T'i, !T'o)
+agent['f < 'i < 'o] App(!Fn'f, !T'i, T'o)
+
+rule Lam(_, i, o) App(_, i, o) {}
+

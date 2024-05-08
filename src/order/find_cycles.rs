@@ -22,10 +22,10 @@ impl<I: Idx> Order<I> {
 
   pub fn cycle_error<D: Display>(
     &self,
-    cycles: Vec<Vec<I>>,
     base_message: impl Display,
     display_item: impl Fn(I) -> D,
   ) -> Result<(), String> {
+    let cycles = self.find_cycles();
     if !cycles.is_empty() {
       use std::fmt::Write;
       let mut error = base_message.to_string();

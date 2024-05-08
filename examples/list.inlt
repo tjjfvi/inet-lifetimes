@@ -17,3 +17,17 @@ rule Cons(_, x, xs) Append(_, ys, o) {
   Append(xs, ys, t)
   Cons(o, x, t)
 }
+
+type DiffList: +
+
+agent['a < 'b? < 'c?] Diff(DiffList'a, !List'b, List'c)
+agent['a < 'b < 'c] Open(!DiffList'a, List'b, !List'c)
+
+rule Diff(_, x, y) Open(_, x, y) {}
+
+agent['a < 'b] DiffAppend(!DiffList'a, !DiffList'a, DiffList'b)
+
+rule Diff(_, x, y) DiffAppend(_, a, b) {
+  Open(a, y, t)
+  Diff(b, x, t)
+}

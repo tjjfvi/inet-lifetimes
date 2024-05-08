@@ -164,7 +164,7 @@ impl<'i> Parser<'i> {
         let next = self.parse_lt_decl(&mut lt_ctx)?;
         if is_related {
           let (a, b) = if is_less { (last, next) } else { (next, last) };
-          lt_ctx.order.relate_lt(a, b, can_equal);
+          lt_ctx.full_order.relate_lt(a, b, can_equal);
         }
         last = next;
       }
@@ -179,8 +179,19 @@ impl<'i> Parser<'i> {
   }
 
   fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx) -> Result<Lifetime, String> {
+    let start = self.index;
     let name = self.parse_lt_name()?;
-    Ok(*self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"))))
+    let fixed = !self.try_consume("?");
+    let end = self.index;
+    let lt = *self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"), fixed));
+    if lt_ctx.lifetimes[lt].fixed != fixed {
+      Err(format!(
+        "inconsistent known/unknown modifiers on lifetime `'{}`:\n{}",
+        lt_ctx.lifetimes[lt].name,
+        highlight_error(start, end, self.input()),
+      ))?
+    }
+    Ok(lt)
   }
 
   fn parse_lt(&mut self) -> Result<Lifetime, String> {
