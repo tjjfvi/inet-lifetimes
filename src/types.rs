@@ -114,6 +114,7 @@ pub struct VarCtx {
 #[derive(Debug, Clone)]
 pub struct VarInfo {
   pub name: String,
+  pub uses: Vec<PortLabel>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +129,15 @@ pub struct RuleInfo {
   pub a: Node,
   pub b: Node,
   pub result: Vec<Node>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetInfo {
+  pub name: String,
+  pub var_ctx: VarCtx,
+  pub lt_ctx: LifetimeCtx,
+  pub free_ports: Vec<(Var, PortLabel)>,
+  pub nodes: Vec<Node>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -173,6 +183,7 @@ pub struct Ctx {
   pub types: IndexVec<Type, TypeInfo>,
   pub agents: IndexVec<Agent, AgentInfo>,
   pub rules: Vec<RuleInfo>,
+  pub nets: Vec<NetInfo>,
 }
 
 impl Ctx {

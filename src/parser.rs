@@ -43,6 +43,8 @@ impl<'i> Parser<'i> {
       self.parse_agent_decl(ctx)
     } else if self.peek_many(4) == Some("rule") {
       self.parse_rule_decl(ctx)
+    } else if self.peek_many(3) == Some("net") {
+      self.parse_net_decl(ctx)
     } else {
       self.expected("type, agent, or rule declaration")
     }
@@ -86,6 +88,22 @@ impl<'i> Parser<'i> {
     let b = self.parse_node(ctx, &mut var_ctx)?;
     let result = self.parse_net(ctx, &mut var_ctx)?;
     ctx.rules.push(RuleInfo { var_ctx, a, b, result });
+    Ok(())
+  }
+
+  fn parse_net_decl(&mut self, ctx: &mut Ctx) -> Result<(), String> {
+    self.consume("net")?;
+    let lt_ctx = self.parse_lt_ctx()?;
+    self.vars_lookup.clear();
+    let mut var_ctx = VarCtx::default();
+    let (name, free_ports) = self.parse_node_like(|slf| {
+      let var = slf.parse_var(&mut var_ctx)?;
+      slf.consume(":")?;
+      let label = slf.parse_port_label()?;
+      Ok((var, label))
+    })?;
+    let nodes = self.parse_net(ctx, &mut var_ctx)?;
+    ctx.nets.push(NetInfo { name, lt_ctx, var_ctx, free_ports, nodes });
     Ok(())
   }
 
@@ -175,7 +193,12 @@ impl<'i> Parser<'i> {
 
   fn parse_var(&mut self, var_ctx: &mut VarCtx) -> Result<Var, String> {
     let name = self.parse_name()?;
-    Ok(*self.vars_lookup.entry(name).or_insert_with_key(|name| var_ctx.vars.push(VarInfo { name: name.clone() })))
+    Ok(
+      *self
+        .vars_lookup
+        .entry(name)
+        .or_insert_with_key(|name| var_ctx.vars.push(VarInfo { name: name.clone(), uses: vec![] })),
+    )
   }
 
   fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx) -> Result<Lifetime, String> {

@@ -25,9 +25,8 @@ agent['a < 'b < 'c] Open(!DiffList'a, List'b, !List'c)
 
 rule Diff(_, x, y) Open(_, x, y) {}
 
-agent['a < 'b] DiffAppend(!DiffList'a, !DiffList'a, DiffList'b)
-
-rule Diff(_, x, y) DiffAppend(_, a, b) {
-  Open(a, y, t)
-  Diff(b, x, t)
+net['a < 'b] diff_append(x: !DiffList'a, y: !DiffList'a, out: DiffList'a) {
+  Diff(out, a, c)
+  Open(x, a, b)
+  Open(y, b, c)
 }

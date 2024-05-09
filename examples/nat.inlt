@@ -44,3 +44,8 @@ rule Succ(_, n) Mul(_, m, out) {
   Mul(n, m1, x)
   Add(m2, x, out)
 }
+
+net['a < 'b] add_two(x: !Nat'a, z: Nat'b) {
+  Succ(y, x)
+  Succ(z, y)
+}
