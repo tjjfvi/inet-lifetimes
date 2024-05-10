@@ -2,9 +2,10 @@ use nohash_hasher::IntMap;
 
 use crate::index_vec::Idx;
 
-use super::{Flag, Order};
+use super::{Flag, Order, Relation};
 
 impl<I: Idx> Order<I> {
+  #[allow(unused)]
   pub fn complete(&self) -> Order<I> {
     self.clear_flags();
     let mut completionist = Completionist { source: self, output: Order::default(), omit: None };
@@ -19,11 +20,11 @@ impl<I: Idx> Order<I> {
     let mut completionist = Completionist { source: other, output: Order::default(), omit: None };
 
     let mut diff = Order::default();
-    for (a, b, eq) in self.iter() {
-      if !other.has(a, b, eq) {
+    for (a, b, rel) in self.iter_forward() {
+      if !other.has(a, b, rel) {
         completionist.visit(a, Some(0));
-        if !completionist.output.has(a, b, eq) {
-          diff.relate_lt(a, b, eq)
+        if !completionist.output.has(a, b, rel) {
+          diff.relate(a, b, rel)
         }
       }
     }
@@ -49,8 +50,8 @@ impl<I: Idx> Order<I> {
     completionist.output
   }
 
-  fn has(&self, a: I, b: I, eq: bool) -> bool {
-    self.els.get(a).and_then(|x| x.rels.get(&b)).is_some_and(|self_eq| !self_eq || eq)
+  fn has(&self, a: I, b: I, rel: Relation) -> bool {
+    self.els.get(a).and_then(|x| x.rels.get(&b)).is_some_and(|&has_rel| (has_rel & rel) == has_rel)
   }
 }
 
@@ -72,7 +73,7 @@ impl<'a, I: Idx> Completionist<'a, I> {
 
     let mut head_depth = usize::MAX;
 
-    for (&b, _) in &el.rels {
+    for (b, _) in el.forward_rels() {
       if !self.omit.is_some_and(|omit| !omit(b)) {
         head_depth = head_depth.min(self.visit(b, depth.map(|x| x + 1)));
       }
@@ -82,14 +83,14 @@ impl<'a, I: Idx> Completionist<'a, I> {
       el.flag.set(Flag::Cycle(head_depth));
     } else {
       let mut rels = IntMap::default();
-      for (&b, &eq_0) in &el.rels {
+      for (b, rel_0) in el.forward_rels() {
         if !self.omit.is_some_and(|omit| omit(b)) {
-          rels.insert(b, eq_0);
+          rels.insert(b, rel_0);
         }
         if !self.omit.is_some_and(|omit| !omit(b)) {
           if let Some(other) = self.output.els.get(b) {
-            for (&c, &eq_1) in &other.rels {
-              rels.insert(c, eq_0 && eq_1);
+            for (c, rel_1) in other.forward_rels() {
+              rels.insert(c, rel_0 & rel_1);
             }
           }
         }
@@ -98,8 +99,10 @@ impl<'a, I: Idx> Completionist<'a, I> {
 
       el.flag.set(Flag::Done);
       if depth == Some(head_depth) {
-        for (&b, _) in &el.rels {
-          self.visit(b, depth.map(|x| x + 1));
+        for (b, _) in el.forward_rels() {
+          if !self.omit.is_some_and(|omit| !omit(b)) {
+            self.visit(b, depth.map(|x| x + 1));
+          }
         }
       }
     }
@@ -110,5 +113,5 @@ impl<'a, I: Idx> Completionist<'a, I> {
 
 #[test]
 fn test() {
-  dbg!(Order::from_iter([(0, 1, false), (1, 2, false), (2, 3, false)]).complete());
+  dbg!(Order::from_iter([(0, 1, Relation::LT), (1, 2, Relation::LT), (2, 3, Relation::LT)]).complete());
 }

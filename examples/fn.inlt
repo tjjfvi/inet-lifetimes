@@ -3,7 +3,16 @@ type T: +
 type Fn: +
 
 agent['f < 'i? < 'o?] Lam(Fn'f, T'i, !T'o)
-agent['f < 'i < 'o] App(!Fn'f, !T'i, T'o)
+agent['f < 'i? < 'o?] App(!Fn'f, !T'i, T'o)
 
 rule Lam(_, i, o) App(_, i, o) {}
 
+net['a < 'b? < 'c?] lam(f: Fn'a, i: T'b, o: !T'c) {
+  Lam(f, i, o)
+}
+
+net['a < 'b] compose(f: !Fn'a, g: !Fn'a, fg: Fn'b) {
+  Lam(fg, x, z)
+  App(f, x, y)
+  App(g, y, z)
+}

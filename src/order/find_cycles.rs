@@ -39,8 +39,10 @@ impl<'a, I: Idx> CycleFinder<'a, I> {
     el.flag.set(Flag::Cycle(strong_depth));
     std::mem::swap(&mut self.active_cycles_0, &mut self.active_cycles_1);
     let new_cycles_start = self.active_cycles_0.len();
-    for (&b, &eq) in &el.rels {
-      self.visit(b, if eq { strong_depth } else { strong_depth + 1 })
+    for (&b, &rel) in &el.rels {
+      if let Some(rel) = rel.forward_component() {
+        self.visit(b, if rel.allows_equal() { strong_depth } else { strong_depth + 1 })
+      }
     }
     for mut cycle in self.active_cycles_0.drain(new_cycles_start..) {
       cycle.push(a);
@@ -56,76 +58,84 @@ impl<'a, I: Idx> CycleFinder<'a, I> {
   }
 }
 
-#[test]
-fn test_simple_cases() {
-  for (order, cycles) in [
-    (Order::default(), vec![]),
-    (Order::from_iter([(0, 1, false), (1, 2, false), (2, 3, false)]), vec![]),
-    (Order::from_iter([(0, 1, false), (1, 2, false), (0, 2, false)]), vec![]),
-    (Order::from_iter([(0, 1, true), (1, 3, true), (0, 2, false), (2, 3, true), (3, 4, false)]), vec![]),
-    (Order::from_iter([(0, 1, true), (1, 0, true)]), vec![]),
-    (Order::from_iter([(0, 0, true)]), vec![]),
-    //
-    (Order::from_iter([(0, 1, false), (1, 0, true)]), vec![vec![0, 1, 0]]),
-    (Order::from_iter([(0, 0, false)]), vec![vec![0, 0]]),
-    (Order::from_iter([(0, 1, false), (0, 2, true), (1, 0, true), (2, 0, false)]), vec![vec![0, 1, 0], vec![0, 2, 0]]),
-    (
-      Order::from_iter([(0, 1, false), (0, 2, true), (1, 0, true), (2, 0, false), (1, 2, false)]),
-      vec![vec![0, 1, 0], vec![0, 1, 2, 0]],
-    ),
-    (
-      Order::from_iter([(0, 1, false), (0, 2, true), (1, 0, true), (2, 0, false), (2, 1, false)]),
-      vec![vec![0, 1, 0], vec![0, 2, 0]],
-    ),
-  ] {
-    assert_eq!(order.find_cycles(), cycles, "order {:?}", order);
-  }
-}
+#[cfg(test)]
+mod tests {
+  use crate::order::{Order, Relation};
 
-// We intentionally don't report *every* possible cycle, as this could take, in
-// the worst case, exponential time.
-//
-// However, we do ensure that every node that is involved in a cycle is involved
-// in at least one reported cycle.
-#[test]
-fn test_extreme_cases() {
-  for n in 1..=100 {
-    // For n=3 this graph looks like:
-    // ```text
-    // a---b---c---a
-    //  \ / \ / \ /
-    //   X   X   X
-    //  / \ / \ / \
-    // x---y---z---x
-    // ```
-    // where two connected nodes denotes a less-than relation flowing
-    // left-to-right (note the duplication of `a` and `x`).
-    //
-    // This has an number of possible cycles exponential on `n`.
-    //
-    // We only report a linear number of these cycles.
+  const LE: Relation = Relation::LE;
+  const LT: Relation = Relation::LT;
 
-    let m = n * 2;
-    let order = Order::from_iter((0..m).flat_map(|x| [(x, (x + 2) % m, false), (x, ((x + 2) % m) ^ 1, false)]));
-    let cycles = order.find_cycles();
-
-    assert_eq!(cycles.len(), n + 2);
-
-    assert!(every_node_represented(&order, &cycles));
+  #[test]
+  fn test_simple_cases() {
+    for (order, cycles) in [
+      (Order::default(), vec![]),
+      (Order::from_iter([(0, 1, LT), (1, 2, LT), (2, 3, LT)]), vec![]),
+      (Order::from_iter([(0, 1, LT), (1, 2, LT), (0, 2, LT)]), vec![]),
+      (Order::from_iter([(0, 1, LE), (1, 3, LE), (0, 2, LT), (2, 3, LE), (3, 4, LT)]), vec![]),
+      (Order::from_iter([(0, 1, LE), (1, 0, LE)]), vec![]),
+      (Order::from_iter([(0, 0, LE)]), vec![]),
+      //
+      (Order::from_iter([(0, 1, LT), (1, 0, LE)]), vec![vec![0, 1, 0]]),
+      (Order::from_iter([(0, 0, LT)]), vec![vec![0, 0]]),
+      (Order::from_iter([(0, 1, LT), (0, 2, LE), (1, 0, LE), (2, 0, LT)]), vec![vec![0, 1, 0], vec![0, 2, 0]]),
+      (
+        Order::from_iter([(0, 1, LT), (0, 2, LE), (1, 0, LE), (2, 0, LT), (1, 2, LT)]),
+        vec![vec![0, 1, 0], vec![0, 1, 2, 0]],
+      ),
+      (
+        Order::from_iter([(0, 1, LT), (0, 2, LE), (1, 0, LE), (2, 0, LT), (2, 1, LT)]),
+        vec![vec![0, 1, 0], vec![0, 2, 0]],
+      ),
+    ] {
+      assert_eq!(order.find_cycles(), cycles, "order {:?}", order);
+    }
   }
 
-  for n in 1..=20 {
-    // This order requires `a < b` for all `a`, `b`.
-    let order = Order::from_iter((0..n).flat_map(|a| (0..n).map(move |b| (a, b, false))));
-    let cycles = order.find_cycles();
+  // We intentionally don't report *every* possible cycle, as this could take, in
+  // the worst case, exponential time.
+  //
+  // However, we do ensure that every node that is involved in a cycle is involved
+  // in at least one reported cycle.
+  #[test]
+  fn test_extreme_cases() {
+    for n in 1..=100 {
+      // For n=3 this graph looks like:
+      // ```text
+      // a---b---c---a
+      //  \ / \ / \ /
+      //   X   X   X
+      //  / \ / \ / \
+      // x---y---z---x
+      // ```
+      // where two connected nodes denotes a less-than relation flowing
+      // left-to-right (note the duplication of `a` and `x`).
+      //
+      // This has an number of possible cycles exponential on `n`.
+      //
+      // We only report a linear number of these cycles.
 
-    // Quadratic on `n`; linear on edge count.
-    assert_eq!(cycles.len(), n * (n + 1) / 2);
+      let m = n * 2;
+      let order = Order::from_iter((0..m).flat_map(|x| [(x, (x + 2) % m, LT), (x, ((x + 2) % m) ^ 1, LT)]));
+      let cycles = order.find_cycles();
 
-    assert!(every_node_represented(&order, &cycles));
-  }
+      assert_eq!(cycles.len(), n + 2);
 
-  fn every_node_represented(order: &Order<usize>, cycles: &Vec<Vec<usize>>) -> bool {
-    order.els.iter().all(|(a, _)| cycles.iter().any(|cycle| cycle.contains(&a)))
+      assert!(every_node_represented(&order, &cycles));
+    }
+
+    for n in 1..=20 {
+      // This order requires `a < b` for all `a`, `b`.
+      let order = Order::from_iter((0..n).flat_map(|a| (0..n).map(move |b| (a, b, LT))));
+      let cycles = order.find_cycles();
+
+      // Quadratic on `n`; linear on edge count.
+      assert_eq!(cycles.len(), n * (n + 1) / 2);
+
+      assert!(every_node_represented(&order, &cycles));
+    }
+
+    fn every_node_represented(order: &Order<usize>, cycles: &Vec<Vec<usize>>) -> bool {
+      order.els.iter().all(|(a, _)| cycles.iter().any(|cycle| cycle.contains(&a)))
+    }
   }
 }

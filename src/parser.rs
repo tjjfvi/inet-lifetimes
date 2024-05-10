@@ -1,4 +1,4 @@
-use crate::types::*;
+use crate::{order::Relation, types::*};
 
 use std::{collections::HashMap, str::FromStr};
 
@@ -167,24 +167,27 @@ impl<'i> Parser<'i> {
       return Ok(lt_ctx);
     }
     if !self.try_consume("]") {
-      let mut last = self.parse_lt_decl(&mut lt_ctx)?;
+      let mut prev = self.parse_lt_decl(&mut lt_ctx)?;
       loop {
         self.skip_trivia();
-        let (is_related, is_less) = match self.peek_one() {
-          Some(',') => (false, false),
-          Some('>') => (true, false),
-          Some('<') => (true, true),
+        let mut rel = match self.peek_one() {
+          Some(',') => None,
+          Some('<') => Some(Relation::LE),
+          Some('>') => Some(Relation::GE),
           Some(']') => break,
           _ => self.expected("comma or comparison operator")?,
         };
         self.advance_one();
-        let can_equal = self.try_consume("=");
-        let next = self.parse_lt_decl(&mut lt_ctx)?;
-        if is_related {
-          let (a, b) = if is_less { (last, next) } else { (next, last) };
-          lt_ctx.full_order.relate_lt(a, b, can_equal);
+        if let Some(rel) = &mut rel {
+          if !self.try_consume("=") {
+            *rel = rel.not_equal();
+          }
         }
-        last = next;
+        let next = self.parse_lt_decl(&mut lt_ctx)?;
+        if let Some(rel) = rel {
+          lt_ctx.full_order.relate(prev, next, rel);
+        }
+        prev = next;
       }
     }
     self.consume("]")?;

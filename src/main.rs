@@ -1,6 +1,8 @@
-#![feature(impl_trait_in_assoc_type, impl_trait_in_fn_trait_return)]
+#![feature(impl_trait_in_assoc_type, impl_trait_in_fn_trait_return, const_option)]
 
 use std::{env, fmt::Display, fs, process::ExitCode};
+
+use order::Relation;
 
 use crate::{
   index_vec::IndexVec,
@@ -32,9 +34,9 @@ fn _main(path: &str) -> Result<(), String> {
     let pri = agent.ports[0];
     for aux in &agent.ports[1..] {
       if !aux.0 == pri.0 {
-        required.relate_polarity(aux.1, pri.1, false, pri.0.polarity());
+        required.relate_polarity(aux.1, pri.1, Relation::LT, pri.0.polarity());
       } else {
-        ty_order.relate_lt(!aux.0, pri.0, false);
+        ty_order.relate(!aux.0, pri.0, Relation::LT);
       }
     }
 
@@ -61,7 +63,12 @@ fn _main(path: &str) -> Result<(), String> {
     let mut lt_ctx = LifetimeCtx::default();
     let a_base = lt_ctx.import(&a.lt_ctx, false, format_args!("{}.", a.name));
     let b_base = lt_ctx.import(&b.lt_ctx, false, format_args!("{}.", b.name));
-    lt_ctx.known_order.relate_polarity(a_base + a.ports[0].1, b_base + b.ports[0].1, true, a.ports[0].0.polarity());
+    lt_ctx.known_order.relate_polarity(
+      a_base + a.ports[0].1,
+      b_base + b.ports[0].1,
+      Relation::LE,
+      a.ports[0].0.polarity(),
+    );
 
     for (lt_base, source_node) in [(a_base, &rule.a), (b_base, &rule.b)] {
       for (i, (&var, label)) in source_node.ports.iter().zip(&ctx.agents[source_node.agent].ports).enumerate() {
@@ -137,7 +144,7 @@ impl VarCtx {
           write!(&mut errors, "\n  `{name}`: mismatched types `{}` and `{}`", types[a.0].name, types[b.0].name,)
             .unwrap();
         } else {
-          lt_ctx.needs_order.relate_polarity(a.1, b.1, true, a.0.polarity());
+          lt_ctx.needs_order.relate_polarity(a.1, b.1, Relation::LE, a.0.polarity());
         }
       }
     }
@@ -174,8 +181,8 @@ impl LifetimeCtx {
         }
       }
 
-      for (a, b, eq) in knows.iter() {
-        write!(&mut err, "\n  {} {} {}", self.show_lt()(a), if eq { "<=" } else { "<" }, self.show_lt()(b)).unwrap();
+      for (a, b, rel) in knows.iter_forward() {
+        write!(&mut err, "\n  {} {rel:?} {}", self.show_lt()(a), self.show_lt()(b)).unwrap();
       }
 
       write!(&mut err, "\n\nwe need:").unwrap();
@@ -186,8 +193,8 @@ impl LifetimeCtx {
         }
       }
 
-      for (a, b, eq) in needs.iter() {
-        write!(&mut err, "\n  {} {} {}", self.show_lt()(a), if eq { "<=" } else { "<" }, self.show_lt()(b)).unwrap();
+      for (a, b, rel) in needs.iter_forward() {
+        write!(&mut err, "\n  {} {rel:?} {}", self.show_lt()(a), self.show_lt()(b)).unwrap();
       }
 
       Err(err)?
