@@ -1,6 +1,6 @@
-mod complete;
 mod find_cycles;
 mod relation;
+mod transistor;
 
 pub use relation::*;
 
@@ -25,12 +25,6 @@ pub struct Order<I: Idx> {
 struct Element<I: Idx> {
   rels: IntMap<I, Relation>,
   flag: Cell<Flag>,
-}
-
-impl<I: Idx> Element<I> {
-  fn forward_rels(&self) -> impl Iterator<Item = (I, Relation)> + '_ {
-    self.rels.iter().filter_map(|(&b, rel)| Some((b, rel.forward_component()?)))
-  }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
