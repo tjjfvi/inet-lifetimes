@@ -1,6 +1,6 @@
 use std::{
   fmt::{Debug, Display},
-  ops::{Add, Not},
+  ops::{Add, BitXor, Index, IndexMut, Not},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -103,7 +103,47 @@ pub struct AgentInfo {
 #[derive(Debug, Clone)]
 pub struct LifetimeInfo {
   pub name: String,
-  pub fixed: bool,
+  pub side: Side,
+  pub max: Option<Lifetime>,
+  pub min: Option<Lifetime>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Side {
+  External,
+  Internal,
+}
+
+impl Display for Side {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Side::External => f.write_str("external"),
+      Side::Internal => f.write_str("internal"),
+    }
+  }
+}
+
+impl Not for Side {
+  type Output = Side;
+
+  fn not(self) -> Self::Output {
+    match self {
+      Side::External => Side::Internal,
+      Side::Internal => Side::External,
+    }
+  }
+}
+
+impl BitXor<bool> for Side {
+  type Output = Side;
+
+  fn bitxor(self, rhs: bool) -> Self::Output {
+    if rhs {
+      !self
+    } else {
+      self
+    }
+  }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -143,14 +183,33 @@ pub struct NetInfo {
 #[derive(Debug, Clone, Default)]
 pub struct LifetimeCtx {
   pub lifetimes: IndexVec<Lifetime, LifetimeInfo>,
-  pub full_order: Order<Lifetime>,
-  pub known_order: Order<Lifetime>,
-  pub needs_order: Order<Lifetime>,
+  pub ex_order: Order<Lifetime>,
+  pub in_order: Order<Lifetime>,
+}
+
+impl Index<Side> for LifetimeCtx {
+  type Output = Order<Lifetime>;
+
+  fn index(&self, index: Side) -> &Self::Output {
+    match index {
+      Side::External => &self.ex_order,
+      Side::Internal => &self.in_order,
+    }
+  }
+}
+
+impl IndexMut<Side> for LifetimeCtx {
+  fn index_mut(&mut self, index: Side) -> &mut Self::Output {
+    match index {
+      Side::External => &mut self.ex_order,
+      Side::Internal => &mut self.in_order,
+    }
+  }
 }
 
 impl LifetimeCtx {
-  pub fn intro(&mut self, name: String, fixed: bool) -> Lifetime {
-    self.lifetimes.push(LifetimeInfo { name, fixed })
+  pub fn intro(&mut self, name: String, side: Side) -> Lifetime {
+    self.lifetimes.push(LifetimeInfo { name, side, min: None, max: None })
   }
 
   pub fn show_lt<'a>(&'a self) -> impl Fn(Lifetime) -> &'a str {
@@ -160,12 +219,16 @@ impl LifetimeCtx {
   pub fn import(&mut self, from: &LifetimeCtx, invert: bool, prefix: impl Display) -> Lifetime {
     let base = self.lifetimes.len();
     for lt in from.lifetimes.values() {
-      self.lifetimes.push(LifetimeInfo { name: format!("'{prefix}{}", &lt.name[1..]), fixed: lt.fixed ^ invert });
+      self.lifetimes.push(LifetimeInfo {
+        name: format!("'{prefix}{}", &lt.name[1..]),
+        side: lt.side ^ invert,
+        min: lt.min.map(|lt| base + lt),
+        max: lt.max.map(|lt| base + lt),
+      });
     }
-    let (known, needs) =
-      if invert { (&from.needs_order, &from.known_order) } else { (&from.known_order, &from.needs_order) };
-    self.known_order.import(known, |lt| base + lt);
-    self.needs_order.import(needs, |lt| base + lt);
+    let (known, needs) = if invert { (&from.in_order, &from.ex_order) } else { (&from.ex_order, &from.in_order) };
+    self.ex_order.import(known, |lt| base + lt);
+    self.in_order.import(needs, |lt| base + lt);
     base
   }
 }

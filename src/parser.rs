@@ -167,15 +167,27 @@ impl<'i> Parser<'i> {
       return Ok(lt_ctx);
     }
     if !self.try_consume("]") {
-      let mut prev = self.parse_lt_decl(&mut lt_ctx)?;
+      let mut side = Side::External ^ self.try_consume("|");
+      let mut prev = self.parse_lt_decl(&mut lt_ctx, side)?;
       loop {
         self.skip_trivia();
         let mut rel = match self.peek_one() {
           Some(',') => None,
           Some('<') => Some(Relation::LE),
           Some('>') => Some(Relation::GE),
+          Some('|') => {
+            if side == Side::External {
+              side = Side::Internal;
+              if self.try_consume("]") {
+                break;
+              }
+              None
+            } else {
+              self.expected("comma or comparison operator")?
+            }
+          }
           Some(']') => break,
-          _ => self.expected("comma or comparison operator")?,
+          _ => self.expected("comma, comparison operator, or separator")?,
         };
         self.advance_one();
         if let Some(rel) = &mut rel {
@@ -183,9 +195,12 @@ impl<'i> Parser<'i> {
             *rel = rel.not_equal();
           }
         }
-        let next = self.parse_lt_decl(&mut lt_ctx)?;
+        let next = self.parse_lt_decl(&mut lt_ctx, side)?;
         if let Some(rel) = rel {
-          lt_ctx.full_order.relate(prev, next, rel);
+          match side {
+            Side::External => lt_ctx.ex_order.relate(prev, next, rel),
+            Side::Internal => lt_ctx.in_order.relate(prev, next, rel),
+          }
         }
         prev = next;
       }
@@ -204,13 +219,13 @@ impl<'i> Parser<'i> {
     )
   }
 
-  fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx) -> Result<Lifetime, String> {
+  fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx, side: Side) -> Result<Lifetime, String> {
     let start = self.index;
     let name = self.parse_lt_name()?;
-    let fixed = !self.try_consume("?");
+    let side = side ^ self.try_consume("?");
     let end = self.index;
-    let lt = *self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"), fixed));
-    if lt_ctx.lifetimes[lt].fixed != fixed {
+    let lt = *self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"), side));
+    if lt_ctx.lifetimes[lt].side != side {
       Err(format!(
         "inconsistent known/unknown modifiers on lifetime `'{}`:\n{}",
         lt_ctx.lifetimes[lt].name,

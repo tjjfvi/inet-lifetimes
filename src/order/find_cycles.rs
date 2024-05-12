@@ -7,7 +7,7 @@ impl<I: Idx> Order<I> {
     self.clear_flags();
     let mut finder =
       CycleFinder { order: self, finished_cycles: vec![], active_cycles_0: vec![], active_cycles_1: vec![] };
-    for (a, _) in &self.els {
+    for a in self.els.keys() {
       finder.visit(a, 0);
     }
     debug_assert!(finder.active_cycles_0.len() == 0);
@@ -40,7 +40,7 @@ impl<'a, I: Idx> CycleFinder<'a, I> {
     std::mem::swap(&mut self.active_cycles_0, &mut self.active_cycles_1);
     let new_cycles_start = self.active_cycles_0.len();
     for (&b, &rel) in &el.rels {
-      if let Some(rel) = rel.forward_component() {
+      if let Some(rel) = rel.lte_component() {
         self.visit(b, if rel.allows_equal() { strong_depth } else { strong_depth + 1 })
       }
     }
@@ -135,7 +135,7 @@ mod tests {
     }
 
     fn every_node_represented(order: &Order<usize>, cycles: &Vec<Vec<usize>>) -> bool {
-      order.els.iter().all(|(a, _)| cycles.iter().any(|cycle| cycle.contains(&a)))
+      order.els.keys().all(|a| cycles.iter().any(|cycle| cycle.contains(&a)))
     }
   }
 }

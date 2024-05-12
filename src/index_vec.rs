@@ -67,6 +67,9 @@ impl<I: Idx, T> IndexVec<I, T> {
   pub fn iter_mut(&mut self) -> impl Iterator<Item = (I, &mut T)> {
     self.vec.iter_mut().enumerate().map(|(index, value)| (index.into(), value))
   }
+  pub fn keys(&self) -> impl Iterator<Item = I> {
+    (0..self.vec.len()).map(I::from)
+  }
   pub fn values(&self) -> impl Iterator<Item = &T> {
     self.vec.iter()
   }

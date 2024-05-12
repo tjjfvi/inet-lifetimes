@@ -3,40 +3,30 @@ use crate::index_vec::Idx;
 use super::{Flag, Order, Relation};
 
 impl<I: Idx> Order<I> {
-  fn complete(&self) -> Transistor<I> {
+  pub fn complete(&self) -> Transistor<I> {
     Transistor::new(
       self,
       TransistorConfig {
-        enter: &|_, rel, _| rel.forward_component().is_some(),
-        remap: &|_, rel, _| rel.forward_component(),
-        trans: &|_, r0, _, r1, _| Some(r0.forward_component()? & r1.forward_component()?),
+        enter: &|_, rel, _| rel.lte_component().is_some(),
+        remap: &|_, rel, _| rel.lte_component(),
+        trans: &|_, r0, _, r1, _| Some(r0.lte_component()? & r1.lte_component()?),
       },
     )
   }
 
-  pub fn difference(&self, other: &Order<I>) -> Order<I> {
+  pub fn difference<'a>(&'a self, other: &'a Order<I>) -> impl Iterator<Item = (I, I, Relation)> + 'a {
     let mut transistor = other.complete();
 
-    let mut diff = Order::default();
-    for (a, b, rel) in self.iter_forward() {
-      if !other.has(a, b, rel) {
-        transistor.visit(a);
-        if !transistor.output.has(a, b, rel) {
-          diff.relate(a, b, rel)
-        }
-      }
-    }
-
-    diff
+    self.iter_forward().filter(move |&(a, b, rel)| transistor.has(a, b, rel))
   }
 
   pub fn omit(&self, omit: &dyn Fn(I) -> bool) -> Order<I> {
     let mut output = Transistor::new(
       self,
       TransistorConfig {
-        enter: &|_, rel, b| omit(b) && rel.forward_component().is_some(),
-        remap: &|_, rel, b| (!omit(b)).then(|| rel.forward_component()).flatten(),
-        trans: &|_, r0, _, r1, _| Some(r0.forward_component()? & r1.forward_component()?),
+        enter: &|_, rel, b| omit(b) && rel.lte_component().is_some(),
+        remap: &|_, rel, b| (!omit(b)).then(|| rel.lte_component()).flatten(),
+        trans: &|_, r0, _, r1, _| Some(r0.lte_component()? & r1.lte_component()?),
       },
     )
     .finish_where(|a| !omit(a));
@@ -60,15 +50,16 @@ pub struct TransistorConfig<'a, I: Idx> {
 }
 
 pub struct Transistor<'a, I: Idx> {
-  source: &'a Order<I>,
+  pub source: &'a Order<I>,
   pub output: Order<I>,
-  cfg: TransistorConfig<'a, I>,
+  pub cfg: TransistorConfig<'a, I>,
+  __: (),
 }
 
 impl<'a, I: Idx> Transistor<'a, I> {
   pub fn new(source: &'a Order<I>, cfg: TransistorConfig<'a, I>) -> Self {
     source.clear_flags();
-    Transistor { source, output: Order::default(), cfg }
+    Transistor { source, output: Order::default(), cfg, __: () }
   }
 
   #[allow(unused)]
@@ -82,7 +73,7 @@ impl<'a, I: Idx> Transistor<'a, I> {
   }
 
   pub fn visit_where(&mut self, visit: impl Fn(I) -> bool) {
-    for (a, _) in &self.source.els {
+    for a in self.source.els.keys() {
       if visit(a) {
         self.visit(a);
       }
@@ -147,6 +138,15 @@ impl<'a, I: Idx> Transistor<'a, I> {
     }
 
     head_depth
+  }
+
+  pub fn has(&mut self, a: I, b: I, rel: Relation) -> bool {
+    if !self.source.has(a, b, rel) {
+      self.visit(a);
+      !self.output.has(a, b, rel)
+    } else {
+      false
+    }
   }
 }
 

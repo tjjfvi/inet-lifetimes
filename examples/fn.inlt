@@ -2,12 +2,12 @@
 type T: +
 type Fn: +
 
-agent['f < 'i? < 'o?] Lam(Fn'f, T'i, !T'o)
-agent['f < 'i? < 'o?] App(!Fn'f, !T'i, T'o)
+agent['f | 'f? <= 'o, 'i < 'o] Lam(Fn'f, T'i, !T'o)
+agent['a < 'b] App(!Fn'a, !T'a, T'b)
 
 rule Lam(_, i, o) App(_, i, o) {}
 
-net['a < 'b? < 'c?] lam(f: Fn'a, i: T'b, o: !T'c) {
+net['a | 'a? < 'b < 'c] lam(f: Fn'a, i: T'b, o: !T'c) {
   Lam(f, i, o)
 }
 

@@ -1,7 +1,7 @@
 use std::{
   fmt::Debug,
   num::NonZeroU8,
-  ops::{BitAnd, BitAndAssign},
+  ops::{Add, BitAnd, BitAndAssign},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,11 +26,11 @@ impl Relation {
     Self::new(((self.val() << 2) & 0b1111) | (self.val() >> 2))
   }
 
-  pub fn forward_component(self) -> Option<Self> {
+  pub fn lte_component(self) -> Option<Self> {
     Some(Self(NonZeroU8::new(self.val() & 0b00_11)?))
   }
 
-  pub fn backward_component(self) -> Option<Self> {
+  pub fn gte_component(self) -> Option<Self> {
     Some(Self(NonZeroU8::new(self.val() & 0b11_00)?))
   }
 
@@ -57,6 +57,17 @@ impl BitAndAssign for Relation {
   }
 }
 
+impl Add for Relation {
+  type Output = Option<Relation>;
+
+  fn add(self, rhs: Self) -> Self::Output {
+    Some(Self(NonZeroU8::new(
+      self.lte_component().and_then(|x| Some(x & rhs.lte_component()?)).map(Self::val).unwrap_or(0)
+        | self.gte_component().and_then(|x| Some(x & rhs.gte_component()?)).map(Self::val).unwrap_or(0),
+    )?))
+  }
+}
+
 impl Debug for Relation {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match *self {
@@ -65,7 +76,7 @@ impl Debug for Relation {
       Relation::GE => f.write_str(">="),
       Relation::GT => f.write_str(">"),
       Relation::EQ => f.write_str("=="),
-      _ => write!(f, "{:?} & {:?}", self.forward_component(), self.backward_component()),
+      _ => write!(f, "{:?} & {:?}", self.lte_component(), self.gte_component()),
     }
   }
 }

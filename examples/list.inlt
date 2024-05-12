@@ -20,8 +20,8 @@ rule Cons(_, x, xs) Append(_, ys, o) {
 
 type DiffList: +
 
-agent['a < 'b? < 'c?] Diff(DiffList'a, !List'b, List'c)
-agent['a < 'b < 'c] Open(!DiffList'a, List'b, !List'c)
+agent['a | 'a? <= 'c, 'b < 'c] Diff(DiffList'a, List'b, !List'c)
+agent['a < 'b] Open(!DiffList'a, !List'a, List'b)
 
 rule Diff(_, x, y) Open(_, x, y) {}
 

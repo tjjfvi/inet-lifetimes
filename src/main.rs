@@ -1,12 +1,13 @@
 #![feature(impl_trait_in_assoc_type, impl_trait_in_fn_trait_return, const_option)]
 
-use std::{env, fmt::Display, fs, process::ExitCode};
+use std::{borrow::Cow, env, fmt::Display, fs, process::ExitCode};
 
-use order::Relation;
+use order::{Element, Relation};
+use types::{LifetimeInfo, Side};
 
 use crate::{
   index_vec::IndexVec,
-  order::Order,
+  order::{Order, Transistor, TransistorConfig},
   types::{Agent, AgentInfo, Ctx, Lifetime, LifetimeCtx, Node, PortLabel, Type, TypeInfo, VarCtx, VarInfo},
   util::DisplayFn,
 };
@@ -24,7 +25,11 @@ fn _main(path: &str) -> Result<(), String> {
   let mut ty_order = Order::default();
 
   for agent in ctx.agents.values_mut() {
-    agent.lt_ctx.full_order.verify_acyclic(
+    agent.lt_ctx.ex_order.verify_acyclic(
+      format_args!("impossible lifetime requirements in declaration of agent `{}`:", agent.name),
+      agent.lt_ctx.show_lt(),
+    )?;
+    agent.lt_ctx.in_order.verify_acyclic(
       format_args!("impossible lifetime requirements in declaration of agent `{}`:", agent.name),
       agent.lt_ctx.show_lt(),
     )?;
@@ -40,14 +45,19 @@ fn _main(path: &str) -> Result<(), String> {
       }
     }
 
+    let mut full_order = agent.lt_ctx.ex_order.clone();
+    full_order.import(&agent.lt_ctx.in_order, |x| x);
+
     agent.lt_ctx.verify_implication(
-      &agent.lt_ctx.full_order,
+      None,
+      &full_order,
       &required,
       format_args!("validity of agent `{}` would require impossible lifetime constraints:", agent.name),
       format_args!("validity of agent `{}` requires constraints not present in declaration:", agent.name),
     )?;
 
-    agent.lt_ctx.split_full_order();
+    agent.lt_ctx.populate_bounds(Side::Internal, format_args!("agent `{}`", agent.name))?;
+    agent.lt_ctx.populate_bounds(Side::External, format_args!("agent `{}`", agent.name))?;
   }
 
   ty_order.verify_acyclic("found cycles in type order:", ctx.show_type())?;
@@ -63,7 +73,7 @@ fn _main(path: &str) -> Result<(), String> {
     let mut lt_ctx = LifetimeCtx::default();
     let a_base = lt_ctx.import(&a.lt_ctx, false, format_args!("{}.", a.name));
     let b_base = lt_ctx.import(&b.lt_ctx, false, format_args!("{}.", b.name));
-    lt_ctx.known_order.relate_polarity(
+    lt_ctx.ex_order.relate_polarity(
       a_base + a.ports[0].1,
       b_base + b.ports[0].1,
       Relation::LE,
@@ -80,8 +90,9 @@ fn _main(path: &str) -> Result<(), String> {
     rule.var_ctx.verify_types(&ctx.types, &mut lt_ctx, format_args!("type errors in rule `{rule_name}`:"))?;
 
     lt_ctx.verify_implication(
-      &lt_ctx.known_order,
-      &lt_ctx.needs_order,
+      Some(Side::Internal),
+      &lt_ctx.ex_order,
+      &lt_ctx.in_order,
       format_args!("validity of rule `{rule_name}` would require impossible lifetime constraints:"),
       format_args!("validity of rule `{rule_name}` would require constraints not guaranteed by agents:"),
     )?;
@@ -90,12 +101,14 @@ fn _main(path: &str) -> Result<(), String> {
   for net in ctx.nets.iter_mut() {
     let name = &net.name;
 
-    net.lt_ctx.full_order.verify_acyclic(
+    net.lt_ctx.ex_order.verify_acyclic(
       format_args!("impossible lifetime requirements in declaration of net `{name}`:"),
       net.lt_ctx.show_lt(),
     )?;
-
-    net.lt_ctx.split_full_order();
+    net.lt_ctx.in_order.verify_acyclic(
+      format_args!("impossible lifetime requirements in declaration of net `{name}`:"),
+      net.lt_ctx.show_lt(),
+    )?;
 
     for &(var, label) in &net.free_ports {
       net.var_ctx.vars[var].uses.push(PortLabel(!label.0, label.1))
@@ -105,14 +118,77 @@ fn _main(path: &str) -> Result<(), String> {
     net.var_ctx.verify_types(&ctx.types, &mut net.lt_ctx, format_args!("type errors in net `{name}`:"))?;
 
     net.lt_ctx.verify_implication(
-      &net.lt_ctx.known_order,
-      &net.lt_ctx.needs_order,
+      Some(Side::Internal),
+      &net.lt_ctx.ex_order,
+      &net.lt_ctx.in_order,
       format_args!("validity of net `{name}` would require impossible lifetime constraints:"),
       format_args!("validity of net `{name}` would require constraints not guaranteed:"),
     )?;
   }
 
   Ok(())
+}
+
+impl LifetimeCtx {
+  fn populate_bounds(&mut self, side: Side, name: impl Display) -> Result<(), String> {
+    let bounds = Transistor::new(
+      &self[side],
+      TransistorConfig {
+        enter: &|_, _, b| self.lifetimes[b].side == side,
+        remap: &|_, r, b| (self.lifetimes[b].side != side).then_some(r),
+        trans: &|_, r0, _, r1, _| r0 + r1,
+      },
+    )
+    .finish_where(|a| self.lifetimes[a].side == side);
+
+    for (a, info) in &mut self.lifetimes {
+      if info.side != side {
+        continue;
+      }
+      let Some(el) = bounds.els.get(a) else {
+        continue;
+      };
+      info.min = Self::get_bound(info, el, side, Relation::gte_component, &name, "lower")?;
+      info.max = Self::get_bound(info, el, side, Relation::lte_component, &name, "upper")?;
+    }
+
+    Ok(())
+  }
+
+  fn get_bound(
+    info: &LifetimeInfo,
+    el: &Element<Lifetime>,
+    side: Side,
+    component: impl Fn(Relation) -> Option<Relation>,
+    name: impl Display,
+    bound_type: impl Display,
+  ) -> Result<Option<Lifetime>, String> {
+    let mut bounds = el.rels.iter().filter_map(|(&b, &r)| Some((b, component(r)?)));
+    Ok(if let Some((min, rel)) = bounds.next() {
+      if bounds.next().is_some() {
+        Err(format!(
+          "in {name}, {side} lifetime `{lt}` has multiple {other_side} {bound_type} bounds
+  rewrite the contract so there is only one
+  (this is a temporary limitation of the checker)",
+          lt = info.name,
+          other_side = !side,
+        ))?;
+        todo!()
+      }
+      if !rel.allows_equal() {
+        Err(format!(
+          "in {name}, {side} lifetime `{lt}`'s {other_side} {bound_type} bound is related with `<`, not `<=`
+  rewrite the contract so that it uses `<=`
+  (this is a temporary limitation of the checker)",
+          lt = info.name,
+          other_side = !side,
+        ))?;
+      }
+      Some(min)
+    } else {
+      None
+    })
+  }
 }
 
 impl VarCtx {
@@ -144,7 +220,7 @@ impl VarCtx {
           write!(&mut errors, "\n  `{name}`: mismatched types `{}` and `{}`", types[a.0].name, types[b.0].name,)
             .unwrap();
         } else {
-          lt_ctx.needs_order.relate_polarity(a.1, b.1, Relation::LE, a.0.polarity());
+          lt_ctx.in_order.relate_polarity(a.1, b.1, Relation::LE, a.0.polarity());
         }
       }
     }
@@ -155,28 +231,36 @@ impl VarCtx {
 }
 
 impl LifetimeCtx {
-  fn split_full_order(&mut self) {
-    self.known_order = self.full_order.omit(&|lt| !self.lifetimes[lt].fixed);
-    self.needs_order = self.full_order.difference(&self.known_order);
-  }
-
   fn verify_implication(
     &self,
+    side: Option<Side>,
     knows: &Order<Lifetime>,
     needs: &Order<Lifetime>,
     cycle_message: impl Display,
     diff_message: impl Display,
   ) -> Result<(), String> {
-    needs.verify_acyclic(cycle_message, self.show_lt())?;
+    needs.verify_acyclic(&cycle_message, self.show_lt())?;
 
-    let diff = needs.omit(&|lt| !self.lifetimes[lt].fixed).difference(&knows);
-    if let Err(mut err) = diff.verify_empty(diff_message, self.show_lt()) {
+    let mut new_knows = Cow::Borrowed(knows);
+    let mut problems = Order::default();
+    for (a, b, rel_ab) in needs.omit(&|lt| Some(self.lifetimes[lt].side) == side).difference(&knows) {
+      match (self.lifetimes[a].max, self.lifetimes[b].min) {
+        (Some(x), Some(y)) => new_knows.to_mut().relate(x, y, rel_ab),
+        (Some(x), None) => new_knows.to_mut().relate(x, b, rel_ab),
+        (None, Some(y)) => new_knows.to_mut().relate(a, y, rel_ab),
+        (None, None) => problems.relate(a, b, rel_ab),
+      }
+    }
+
+    new_knows.verify_acyclic(cycle_message, self.show_lt())?;
+
+    if let Err(mut err) = problems.verify_empty(diff_message, self.show_lt()) {
       use std::fmt::Write;
 
       write!(&mut err, "\n\nwe know:").unwrap();
 
       for lt in self.lifetimes.values() {
-        if lt.fixed {
+        if Some(lt.side) != side {
           write!(&mut err, " {}", lt.name).unwrap();
         }
       }
@@ -188,7 +272,7 @@ impl LifetimeCtx {
       write!(&mut err, "\n\nwe need:").unwrap();
 
       for lt in self.lifetimes.values() {
-        if !lt.fixed {
+        if Some(lt.side) == side {
           write!(&mut err, " {}", lt.name).unwrap();
         }
       }

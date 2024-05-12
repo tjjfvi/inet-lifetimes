@@ -3,6 +3,7 @@ mod relation;
 mod transistor;
 
 pub use relation::*;
+pub use transistor::*;
 
 use std::{
   cell::Cell,
@@ -18,12 +19,12 @@ use nohash_hasher::IntMap;
 
 #[derive(Clone)]
 pub struct Order<I: Idx> {
-  els: IndexVec<I, Element<I>>,
+  pub els: IndexVec<I, Element<I>>,
 }
 
 #[derive(Clone)]
-struct Element<I: Idx> {
-  rels: IntMap<I, Relation>,
+pub struct Element<I: Idx> {
+  pub rels: IntMap<I, Relation>,
   flag: Cell<Flag>,
 }
 
@@ -106,7 +107,7 @@ impl<I: Idx> Order<I> {
   }
 
   pub fn iter_forward(&self) -> impl Iterator<Item = (I, I, Relation)> + '_ {
-    self.iter().filter_map(|(a, b, rel)| Some((a, b, rel.forward_component()?)))
+    self.iter().filter_map(|(a, b, rel)| Some((a, b, rel.lte_component()?)))
   }
 
   fn clear_flags(&self) {
@@ -162,7 +163,7 @@ impl<I: Idx> Order<I> {
       let mut last = None;
       for &b in &cycle {
         if let Some(a) = last {
-          write!(f, " {:?} ", self.els[a].rels[&b].forward_component().unwrap())?;
+          write!(f, " {:?} ", self.els[a].rels[&b].lte_component().unwrap())?;
         }
         write!(f, "{}", display_item(b))?;
         last = Some(b);
