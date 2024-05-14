@@ -7,7 +7,7 @@ agent['a < 'b] App(!Fn'a, !T'a, T'b)
 
 rule Lam(_, i, o) App(_, i, o) {}
 
-net['a | 'a? < 'b < 'c] lam(f: Fn'a, i: T'b, o: !T'c) {
+net['a | 'a? <= 'c, 'b < 'c] lam(f: Fn'a, i: T'b, o: !T'c) {
   Lam(f, i, o)
 }
 

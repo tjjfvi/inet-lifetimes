@@ -11,8 +11,8 @@ use std::{
 };
 
 use crate::{
+  globals::Polarity,
   index_vec::{Idx, IndexVec},
-  types::Polarity,
   util::{Captures, DisplayFn},
 };
 use nohash_hasher::IntMap;
@@ -133,7 +133,7 @@ impl<I: Idx> Order<I> {
     }
   }
 
-  pub fn verify_acyclic<D: Display>(
+  pub fn check_acyclic<D: Display>(
     &self,
     base_message: impl Display,
     display_item: impl Fn(I) -> D,
