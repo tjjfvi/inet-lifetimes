@@ -2,7 +2,7 @@
 source: tests/check.rs
 input_file: tests/programs/bad.inlt
 ---
-errors:
+check errors:
   duplicate definition of type `X`
   in agent `Foo`:
     previous error in type `X`

@@ -1,0 +1,7 @@
+
+include ../nat.inlt
+
+net['a] inf_nat(inf: Nat'a) {
+  Dup(x, inf, y)
+  Succ(x, y)
+}

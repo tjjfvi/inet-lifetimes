@@ -4,7 +4,7 @@ use inet_lifetimes::check;
 
 const OK_PATHS: &[&str] = &["examples/fn.inlt", "examples/list.inlt", "examples/nat.inlt"];
 
-const ERR_PATHS: &[&str] = &["tests/programs/bad.inlt"];
+const ERR_PATHS: &[&str] = &["examples/bad/inf_nat.inlt", "tests/programs/bad.inlt"];
 
 #[test]
 fn test_ok() {

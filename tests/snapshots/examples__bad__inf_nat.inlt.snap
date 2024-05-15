@@ -1,0 +1,8 @@
+---
+source: tests/check.rs
+input_file: examples/bad/inf_nat.inlt
+---
+check errors:
+  in net `inf_nat`:
+    validity requires incoherent lifetime constraints:
+      '0.a < '0.b <= '1.a < '1.b <= '0.a

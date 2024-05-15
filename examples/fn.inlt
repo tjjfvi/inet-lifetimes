@@ -1,13 +1,15 @@
 
-type T: +
+include ./nat.inlt
+
 type Fn: +
 
-agent['f | 'f? <= 'o, 'i < 'o] Lam(Fn'f, T'i, !T'o)
-agent['a < 'b] App(!Fn'a, !T'a, T'b)
+agent['f | 'f? <= 'o, 'i < 'o] Lam(Fn'f, Nat'i, !Nat'o)
+agent['a < 'b] App(!Fn'a, !Nat'a, Nat'b)
 
 rule Lam(_, i, o) App(_, i, o) {}
 
-net['a | 'a? <= 'c, 'b < 'c] lam(f: Fn'a, i: T'b, o: !T'c) {
+// a trivial wrapper around `Lam`
+net['a | 'a? <= 'c, 'b < 'c] lam(f: Fn'a, i: Nat'b, o: !Nat'c) {
   Lam(f, i, o)
 }
 
@@ -15,4 +17,18 @@ net['a < 'b] compose(f: !Fn'a, g: !Fn'a, fg: Fn'b) {
   Lam(fg, x, z)
   App(f, x, y)
   App(g, y, z)
+}
+
+net['a] identity(f: Fn'a) {
+  Lam(f, x, x)
+}
+
+net['a] add_two_fn(f: Fn'a) {
+  Lam(f, i, o)
+  add_two(i, o)
+}
+
+net['a < 'b] add_two_call(i: !Nat'a, o: Nat'b) {
+  add_two_fn(f)
+  App(f, i, o)
 }

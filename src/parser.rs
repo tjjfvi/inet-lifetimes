@@ -7,14 +7,14 @@ use crate::{
   vars::{Var, VarCtx, VarInfo},
 };
 
-use std::str::FromStr;
-
 use highlight_error::highlight_error;
 use TSPL::Parser as _;
 
-struct Parser<'i> {
+#[derive(Default)]
+pub struct Parser<'i> {
   input: &'i str,
   index: usize,
+  program: Program,
   types: ScopeBuilder<'i, Type, TypeInfo>,
   components: ScopeBuilder<'i, Component, ComponentInfo>,
   lifetimes: ScopeBuilder<'i, Lifetime, LifetimeInfo>,
@@ -32,35 +32,44 @@ impl<'i> TSPL::Parser<'i> for Parser<'i> {
 }
 
 impl<'i> Parser<'i> {
-  fn parse_file(&mut self) -> Result<Program, String> {
-    let mut program = Program::default();
+  pub fn parse_file(&mut self, file: &'i str, mut include: impl FnMut(&str)) -> Result<(), String> {
+    self.input = file;
+    self.index = 0;
     self.skip_trivia();
     while !self.is_eof() {
-      self.parse_item(&mut program)?;
+      self.parse_item(&mut include)?;
       self.skip_trivia();
     }
-    program.globals.types = self.types.finish();
-    program.globals.components = self.components.finish();
-    Ok(program)
+    Ok(())
   }
 
-  fn parse_item(&mut self, program: &mut Program) -> Result<(), String> {
+  pub fn finish(mut self) -> Program {
+    self.program.globals.types = self.types.finish();
+    self.program.globals.components = self.components.finish();
+    self.program
+  }
+
+  fn parse_item(&mut self, mut include: impl FnMut(&str)) -> Result<(), String> {
     self.skip_trivia();
-    if self.peek_many(4) == Some("type") {
-      program.types.push(self.parse_type_def()?)
+    if self.peek_many(7) == Some("include") {
+      self.consume("include")?;
+      self.skip_trivia();
+      include(self.take_while(|x| x != '\n'));
+    } else if self.peek_many(4) == Some("type") {
+      self.parse_type_def()?;
     } else if self.peek_many(5) == Some("agent") {
-      program.agents.push(self.parse_agent_def()?)
+      self.parse_agent_def()?;
     } else if self.peek_many(4) == Some("rule") {
-      program.rules.push(self.parse_rule_def()?)
+      self.parse_rule_def()?;
     } else if self.peek_many(3) == Some("net") {
-      program.nets.push(self.parse_net_def()?)
+      self.parse_net_def()?;
     } else {
       self.expected("type, agent, or rule declaration")?;
     }
     Ok(())
   }
 
-  fn parse_type_def(&mut self) -> Result<TypeDef, String> {
+  fn parse_type_def(&mut self) -> Result<(), String> {
     self.consume("type")?;
     let id = self.parse_type()?;
     self.consume(":")?;
@@ -71,28 +80,31 @@ impl<'i> Parser<'i> {
       _ => self.expected("polarity")?,
     };
     self.advance_one();
-    Ok(TypeDef { id, polarity })
+    self.program.types.push(TypeDef { id, polarity });
+    Ok(())
   }
 
-  fn parse_agent_def(&mut self) -> Result<AgentDef, String> {
+  fn parse_agent_def(&mut self) -> Result<(), String> {
     self.consume("agent")?;
     let mut lt_ctx = self.parse_lt_ctx()?;
     let (id, ports) = self.parse_node_like(Self::parse_port_label)?;
     lt_ctx.lifetimes = self.lifetimes.finish();
-    Ok(AgentDef { id, lt_ctx, ports })
+    self.program.agents.push(AgentDef { id, lt_ctx, ports });
+    Ok(())
   }
 
-  fn parse_rule_def(&mut self) -> Result<RuleDef, String> {
+  fn parse_rule_def(&mut self) -> Result<(), String> {
     self.consume("rule")?;
     self.vars.ensure_empty();
     let a = self.parse_node()?;
     let b = self.parse_node()?;
     let result = self.parse_net()?;
     let var_ctx = VarCtx { vars: self.vars.finish() };
-    Ok(RuleDef { var_ctx, a, b, result })
+    self.program.rules.push(RuleDef { var_ctx, a, b, result });
+    Ok(())
   }
 
-  fn parse_net_def(&mut self) -> Result<NetDef, String> {
+  fn parse_net_def(&mut self) -> Result<(), String> {
     self.consume("net")?;
     let mut lt_ctx = self.parse_lt_ctx()?;
     self.vars.ensure_empty();
@@ -105,7 +117,8 @@ impl<'i> Parser<'i> {
     let nodes = self.parse_net()?;
     let var_ctx = VarCtx { vars: self.vars.finish() };
     lt_ctx.lifetimes = self.lifetimes.finish();
-    Ok(NetDef { id, lt_ctx, var_ctx, free_ports, nodes })
+    self.program.nets.push(NetDef { id, lt_ctx, var_ctx, free_ports, nodes });
+    Ok(())
   }
 
   fn parse_node(&mut self) -> Result<Node, String> {
@@ -259,21 +272,5 @@ impl<'i> Parser<'i> {
 
   fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || "_.-/$".contains(c)
-  }
-}
-
-impl FromStr for Program {
-  type Err = String;
-
-  fn from_str(input: &str) -> Result<Self, Self::Err> {
-    Parser {
-      input,
-      index: 0,
-      types: ScopeBuilder::default(),
-      components: ScopeBuilder::default(),
-      lifetimes: ScopeBuilder::default(),
-      vars: ScopeBuilder::default(),
-    }
-    .parse_file()
   }
 }
