@@ -1,7 +1,7 @@
 mod check_satisfiable;
 mod populate_bounds;
 
-use crate::{index_vec::IndexVec, new_index, order::Order};
+use crate::{new_index, order::Order, scope::Scope};
 use std::{
   fmt::{Debug, Display},
   ops::{Add, BitXor, Index, IndexMut, Not},
@@ -9,39 +9,36 @@ use std::{
 
 #[derive(Debug, Clone, Default)]
 pub struct LifetimeCtx {
-  pub lifetimes: IndexVec<Lifetime, LifetimeInfo>,
+  pub lifetimes: Scope<Lifetime, LifetimeInfo>,
   pub ex_order: Order<Lifetime>,
   pub in_order: Order<Lifetime>,
 }
 
-new_index!(pub Lifetime);
+new_index!(pub Lifetime "lifetime");
 
 #[derive(Debug, Clone)]
 pub struct LifetimeInfo {
-  pub name: String,
   pub side: Side,
   pub max: Option<Lifetime>,
   pub min: Option<Lifetime>,
 }
 
 impl LifetimeCtx {
-  pub fn intro(&mut self, name: String, side: Side) -> Lifetime {
-    self.lifetimes.push(LifetimeInfo { name, side, min: None, max: None })
-  }
-
   pub fn show_lt<'a>(&'a self) -> impl Fn(Lifetime) -> &'a str {
-    |lt| &self.lifetimes[lt].name
+    |lt| self.lifetimes.name(lt)
   }
 
   pub fn import(&mut self, from: &LifetimeCtx, invert: bool, prefix: impl Display) -> Lifetime {
     let base = self.lifetimes.len();
-    for lt in from.lifetimes.values() {
-      self.lifetimes.push(LifetimeInfo {
-        name: format!("'{prefix}{}", &lt.name[1..]),
-        side: lt.side ^ invert,
-        min: lt.min.map(|lt| base + lt),
-        max: lt.max.map(|lt| base + lt),
-      });
+    for (_, name, info) in from.lifetimes.iter() {
+      self.lifetimes.push(
+        format!("'{prefix}{}", &name[1..]),
+        Some(LifetimeInfo {
+          side: info.side ^ invert,
+          min: info.min.map(|lt| base + lt),
+          max: info.max.map(|lt| base + lt),
+        }),
+      );
     }
     let (known, needs) = if invert { (&from.in_order, &from.ex_order) } else { (&from.ex_order, &from.in_order) };
     self.ex_order.import(known, |lt| base + lt);

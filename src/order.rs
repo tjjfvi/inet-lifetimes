@@ -11,9 +11,11 @@ use std::{
 };
 
 use crate::{
+  err,
+  error::{Error, ErrorGroup},
   globals::Polarity,
   index_vec::{Idx, IndexVec},
-  util::{Captures, DisplayFn},
+  util::DisplayFn,
 };
 use nohash_hasher::IntMap;
 
@@ -116,59 +118,40 @@ impl<I: Idx> Order<I> {
     }
   }
 
-  pub fn verify_empty<D: Display>(
-    &self,
-    base_message: impl Display,
-    display_item: impl Fn(I) -> D,
-  ) -> Result<(), String> {
-    if self.els.values().any(|x| !x.rels.is_empty()) {
-      use std::fmt::Write;
-      let mut error = base_message.to_string();
-      for (a, b, rel) in self.iter_forward() {
-        write!(&mut error, "\n  {} {rel:?} {}", display_item(a), display_item(b)).unwrap();
-      }
-      Err(error)
-    } else {
-      Ok(())
+  pub fn verify_empty<D: Display>(&self, display_item: impl Fn(I) -> D) -> ErrorGroup {
+    let mut errors = ErrorGroup::default();
+    for (a, b, rel) in self.iter_forward() {
+      errors.push(err!("{} {rel:?} {}", display_item(a), display_item(b)));
     }
+    errors
   }
 
-  pub fn check_acyclic<D: Display>(
-    &self,
-    base_message: impl Display,
-    display_item: impl Fn(I) -> D,
-  ) -> Result<(), String> {
+  pub fn check_coherent<D: Display>(&self, display_item: impl Fn(I) -> D) -> ErrorGroup {
+    let mut errors = ErrorGroup::default();
     let cycles = self.find_cycles();
-    if !cycles.is_empty() {
-      use std::fmt::Write;
-      let mut error = base_message.to_string();
-      for cycle in cycles {
-        write!(&mut error, "\n  {}", self.show_cycle(cycle, &display_item)).unwrap();
-      }
-      Err(error)
-    } else {
-      Ok(())
+    for cycle in cycles {
+      errors.push(self.show_cycle(cycle, &display_item));
     }
+    errors
   }
 
-  pub fn show_cycle<'a, D: Display>(
-    &'a self,
-    cycle: Vec<I>,
-    display_item: impl Fn(I) -> D,
-  ) -> impl Display + Captures<&'a ()>
+  pub fn show_cycle<'a, D: Display>(&'a self, cycle: Vec<I>, display_item: impl Fn(I) -> D) -> Error
   where
     I: 'a,
   {
-    DisplayFn(move |f| {
-      let mut last = None;
-      for &b in &cycle {
-        if let Some(a) = last {
-          write!(f, " {:?} ", self.els[a].rels[&b].lte_component().unwrap())?;
+    Error::from(
+      DisplayFn(move |f| {
+        let mut last = None;
+        for &b in &cycle {
+          if let Some(a) = last {
+            write!(f, " {:?} ", self.els[a].rels[&b].lte_component().unwrap())?;
+          }
+          write!(f, "{}", display_item(b))?;
+          last = Some(b);
         }
-        write!(f, "{}", display_item(b))?;
-        last = Some(b);
-      }
-      Ok(())
-    })
+        Ok(())
+      })
+      .to_string(),
+    )
   }
 }

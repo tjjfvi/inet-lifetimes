@@ -7,13 +7,17 @@ use std::{
 
 use nohash_hasher::IsEnabled;
 
-pub trait Idx: Copy + Eq + Ord + Hash + IsEnabled + From<usize> + Into<usize> + Debug {}
+pub trait Idx: Copy + Eq + Ord + Hash + IsEnabled + From<usize> + Into<usize> + Debug {
+  const KIND: &'static str;
+}
 
-impl Idx for usize {}
+impl Idx for usize {
+  const KIND: &'static str = "index";
+}
 
 #[macro_export]
 macro_rules! new_index {
-  ($vis:vis $Index:ident) => {
+  ($vis:vis $Index:ident $kind:literal) => {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     $vis struct $Index(pub usize);
 
@@ -29,7 +33,9 @@ macro_rules! new_index {
       }
     }
 
-    impl $crate::index_vec::Idx for $Index {}
+    impl $crate::index_vec::Idx for $Index {
+      const KIND: &'static str = $kind;
+    }
     impl nohash_hasher::IsEnabled for $Index {}
   };
 }

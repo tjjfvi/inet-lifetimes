@@ -1,0 +1,32 @@
+
+type X: +
+type X: +
+
+agent Foo(X'a)
+
+agent Foo(Y'b, Z'b)
+
+type Z: +
+
+agent['a, 'b] Bar(Z'a, !Z'b)
+
+type A: +
+type B: +
+type C: +
+
+agent['a, 'b] AB(A'a, !B'b)
+agent['a, 'b] BC(B'a, !C'b)
+agent['a, 'b] CA(C'a, !A'b)
+
+net['a] foo(x: Z'a) {
+  AB(x, y, q)
+  BC(y)
+  CA(z, z)
+  CA(c, a)
+  CA(a, a)
+}
+
+net bar() {}
+
+agent['a] x(A'a)
+net['a] x(x: A'a) {}

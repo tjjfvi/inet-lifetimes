@@ -1,9 +1,7 @@
 use crate::{
-  globals::GlobalCtx,
-  globals::{Agent, PortLabel},
+  globals::{Component, GlobalCtx, Polarity, PortLabel, Type},
   lifetimes::LifetimeCtx,
-  vars::Var,
-  vars::VarCtx,
+  vars::{Var, VarCtx},
 };
 
 mod check;
@@ -11,12 +9,27 @@ mod check;
 #[derive(Debug, Clone, Default)]
 pub struct Program {
   pub globals: GlobalCtx,
-  pub rules: Vec<RuleInfo>,
-  pub nets: Vec<NetInfo>,
+  pub types: Vec<TypeDef>,
+  pub agents: Vec<AgentDef>,
+  pub rules: Vec<RuleDef>,
+  pub nets: Vec<NetDef>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RuleInfo {
+pub struct TypeDef {
+  pub id: Type,
+  pub polarity: Polarity,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDef {
+  pub id: Component,
+  pub lt_ctx: LifetimeCtx,
+  pub ports: Vec<PortLabel>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuleDef {
   pub var_ctx: VarCtx,
   pub a: Node,
   pub b: Node,
@@ -24,8 +37,8 @@ pub struct RuleInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct NetInfo {
-  pub name: String,
+pub struct NetDef {
+  pub id: Component,
   pub var_ctx: VarCtx,
   pub lt_ctx: LifetimeCtx,
   pub free_ports: Vec<(Var, PortLabel)>,
@@ -34,6 +47,6 @@ pub struct NetInfo {
 
 #[derive(Debug, Clone)]
 pub struct Node {
-  pub agent: Agent,
+  pub component: Component,
   pub ports: Vec<Var>,
 }

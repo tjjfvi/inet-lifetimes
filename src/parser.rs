@@ -1,12 +1,13 @@
 use crate::{
-  globals::{Agent, AgentInfo, GlobalCtx, Polarity, PortLabel, Type, TypeInfo},
-  lifetimes::{Lifetime, LifetimeCtx, Side},
+  globals::{Component, ComponentInfo, Polarity, PortLabel, Type, TypeInfo},
+  lifetimes::{Lifetime, LifetimeCtx, LifetimeInfo, Side},
   order::Relation,
-  program::{NetInfo, Node, Program, RuleInfo},
+  program::{AgentDef, NetDef, Node, Program, RuleDef, TypeDef},
+  scope::ScopeBuilder,
   vars::{Var, VarCtx, VarInfo},
 };
 
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 use highlight_error::highlight_error;
 use TSPL::Parser as _;
@@ -14,10 +15,10 @@ use TSPL::Parser as _;
 struct Parser<'i> {
   input: &'i str,
   index: usize,
-  type_lookup: HashMap<String, Type>,
-  lt_lookup: HashMap<String, Lifetime>,
-  agent_lookup: HashMap<String, Agent>,
-  var_lookup: HashMap<String, Var>,
+  types: ScopeBuilder<'i, Type, TypeInfo>,
+  components: ScopeBuilder<'i, Component, ComponentInfo>,
+  lifetimes: ScopeBuilder<'i, Lifetime, LifetimeInfo>,
+  vars: ScopeBuilder<'i, Var, VarInfo>,
 }
 
 impl<'i> TSPL::Parser<'i> for Parser<'i> {
@@ -38,27 +39,30 @@ impl<'i> Parser<'i> {
       self.parse_item(&mut program)?;
       self.skip_trivia();
     }
+    program.globals.types = self.types.finish();
+    program.globals.components = self.components.finish();
     Ok(program)
   }
 
   fn parse_item(&mut self, program: &mut Program) -> Result<(), String> {
     self.skip_trivia();
     if self.peek_many(4) == Some("type") {
-      self.parse_type_decl(program)
+      program.types.push(self.parse_type_def()?)
     } else if self.peek_many(5) == Some("agent") {
-      self.parse_agent_decl(program)
+      program.agents.push(self.parse_agent_def()?)
     } else if self.peek_many(4) == Some("rule") {
-      self.parse_rule_decl(program)
+      program.rules.push(self.parse_rule_def()?)
     } else if self.peek_many(3) == Some("net") {
-      self.parse_net_decl(program)
+      program.nets.push(self.parse_net_def()?)
     } else {
-      self.expected("type, agent, or rule declaration")
+      self.expected("type, agent, or rule declaration")?;
     }
+    Ok(())
   }
 
-  fn parse_type_decl(&mut self, program: &mut Program) -> Result<(), String> {
+  fn parse_type_def(&mut self) -> Result<TypeDef, String> {
     self.consume("type")?;
-    let name = self.parse_name()?;
+    let id = self.parse_type()?;
     self.consume(":")?;
     self.skip_trivia();
     let polarity = match self.peek_one() {
@@ -67,70 +71,53 @@ impl<'i> Parser<'i> {
       _ => self.expected("polarity")?,
     };
     self.advance_one();
-    let not_info = TypeInfo { name: format!("!{name}") };
-    let info = TypeInfo { name: name.clone() };
-    let (pos_info, neg_info) = if polarity == Polarity::Pos { (info, not_info) } else { (not_info, info) };
-    let pos_ty = program.globals.types.push(pos_info);
-    let neg_ty = program.globals.types.push(neg_info);
-    let ty = if polarity == Polarity::Pos { pos_ty } else { neg_ty };
-    self.type_lookup.insert(name, ty);
-    Ok(())
+    Ok(TypeDef { id, polarity })
   }
 
-  fn parse_agent_decl(&mut self, program: &mut Program) -> Result<(), String> {
+  fn parse_agent_def(&mut self) -> Result<AgentDef, String> {
     self.consume("agent")?;
-    let lt_ctx = self.parse_lt_ctx()?;
-    let (name, ports) = self.parse_node_like(Self::parse_port_label)?;
-    let agent = program.globals.agents.push(AgentInfo { name: name.clone(), lt_ctx, ports });
-    self.agent_lookup.insert(name, agent);
-    Ok(())
+    let mut lt_ctx = self.parse_lt_ctx()?;
+    let (id, ports) = self.parse_node_like(Self::parse_port_label)?;
+    lt_ctx.lifetimes = self.lifetimes.finish();
+    Ok(AgentDef { id, lt_ctx, ports })
   }
 
-  fn parse_rule_decl(&mut self, program: &mut Program) -> Result<(), String> {
+  fn parse_rule_def(&mut self) -> Result<RuleDef, String> {
     self.consume("rule")?;
-    self.var_lookup.clear();
-    let mut var_ctx = VarCtx::default();
-    let a = self.parse_node(&mut program.globals, &mut var_ctx)?;
-    let b = self.parse_node(&mut program.globals, &mut var_ctx)?;
-    let result = self.parse_net(&mut program.globals, &mut var_ctx)?;
-    program.rules.push(RuleInfo { var_ctx, a, b, result });
-    Ok(())
+    self.vars.ensure_empty();
+    let a = self.parse_node()?;
+    let b = self.parse_node()?;
+    let result = self.parse_net()?;
+    let var_ctx = VarCtx { vars: self.vars.finish() };
+    Ok(RuleDef { var_ctx, a, b, result })
   }
 
-  fn parse_net_decl(&mut self, program: &mut Program) -> Result<(), String> {
+  fn parse_net_def(&mut self) -> Result<NetDef, String> {
     self.consume("net")?;
-    let lt_ctx = self.parse_lt_ctx()?;
-    self.var_lookup.clear();
-    let mut var_ctx = VarCtx::default();
-    let (name, free_ports) = self.parse_node_like(|slf| {
-      let var = slf.parse_var(&mut var_ctx)?;
+    let mut lt_ctx = self.parse_lt_ctx()?;
+    self.vars.ensure_empty();
+    let (id, free_ports) = self.parse_node_like(|slf| {
+      let var = slf.parse_var()?;
       slf.consume(":")?;
       let label = slf.parse_port_label()?;
       Ok((var, label))
     })?;
-    let nodes = self.parse_net(&mut program.globals, &mut var_ctx)?;
-    program.nets.push(NetInfo { name, lt_ctx, var_ctx, free_ports, nodes });
-    Ok(())
+    let nodes = self.parse_net()?;
+    let var_ctx = VarCtx { vars: self.vars.finish() };
+    lt_ctx.lifetimes = self.lifetimes.finish();
+    Ok(NetDef { id, lt_ctx, var_ctx, free_ports, nodes })
   }
 
-  fn parse_node(&mut self, globals: &GlobalCtx, var_ctx: &mut VarCtx) -> Result<Node, String> {
-    self.skip_trivia();
-    let name_start = self.index;
-    let (name, ports) = self.parse_node_like(|slf| slf.parse_var(var_ctx))?;
-    let span = || highlight_error(name_start, name_start + name.len(), self.input);
-    let Some(&agent) = self.agent_lookup.get(&name) else { Err(format!("unknown agent `{name}`:\n{}", span()))? };
-    let expected_len = globals.agents[agent].ports.len();
-    if ports.len() != expected_len {
-      Err(format!("expected {expected_len} ports, found {}:\n{}", ports.len(), span()))?
-    }
-    Ok(Node { agent, ports })
+  fn parse_node(&mut self) -> Result<Node, String> {
+    let (component, ports) = self.parse_node_like(|slf| slf.parse_var())?;
+    Ok(Node { component, ports })
   }
 
-  fn parse_net(&mut self, globals: &GlobalCtx, var_ctx: &mut VarCtx) -> Result<Vec<Node>, String> {
+  fn parse_net(&mut self) -> Result<Vec<Node>, String> {
     self.consume("{")?;
     let mut nodes = vec![];
     while !self.try_consume("}") {
-      nodes.push(self.parse_node(globals, var_ctx)?);
+      nodes.push(self.parse_node()?);
     }
     Ok(nodes)
   }
@@ -141,40 +128,41 @@ impl<'i> Parser<'i> {
 
   fn parse_type(&mut self) -> Result<Type, String> {
     let inv = self.try_consume("!");
-    let start = self.index;
     let name = self.parse_name()?;
-    let end = self.index;
-    let ty = self
-      .type_lookup
-      .get(&name)
-      .copied()
-      .ok_or_else(|| format!("unknown type `{name}`:\n{}", highlight_error(start, end, self.input())))?;
+    let ty = *self.types.lookup.entry(name).or_insert_with(|| {
+      self.types.scope.push(format!("!{name}"), None);
+      self.types.scope.push(name.to_owned(), None)
+    });
     Ok(if inv { !ty } else { ty })
   }
 
   fn parse_node_like<T>(
     &mut self,
     mut parse_elem: impl FnMut(&mut Self) -> Result<T, String>,
-  ) -> Result<(String, Vec<T>), String> {
+  ) -> Result<(Component, Vec<T>), String> {
     let name = self.parse_name()?;
+    let component = self.components.get(name);
     self.consume("(")?;
-    let mut elems = vec![parse_elem(self)?];
-    while self.try_consume(",") {
+    let mut elems = Vec::new();
+    while !self.try_consume(")") {
       elems.push(parse_elem(self)?);
+      if !self.try_consume(",") {
+        self.consume(")")?;
+        break;
+      }
     }
-    self.consume(")")?;
-    Ok((name, elems))
+    Ok((component, elems))
   }
 
   fn parse_lt_ctx(&mut self) -> Result<LifetimeCtx, String> {
-    self.lt_lookup.clear();
+    self.lifetimes.ensure_empty();
     let mut lt_ctx = LifetimeCtx::default();
     if !self.try_consume("[") {
       return Ok(lt_ctx);
     }
     if !self.try_consume("]") {
       let mut side = Side::External ^ self.try_consume("|");
-      let mut prev = self.parse_lt_decl(&mut lt_ctx, side)?;
+      let mut prev = self.parse_lt_decl(side)?;
       loop {
         self.skip_trivia();
         let mut rel = match self.peek_one() {
@@ -201,7 +189,7 @@ impl<'i> Parser<'i> {
             *rel = rel.not_equal();
           }
         }
-        let next = self.parse_lt_decl(&mut lt_ctx, side)?;
+        let next = self.parse_lt_decl(side)?;
         if let Some(rel) = rel {
           match side {
             Side::External => lt_ctx.ex_order.relate(prev, next, rel),
@@ -215,48 +203,38 @@ impl<'i> Parser<'i> {
     Ok(lt_ctx)
   }
 
-  fn parse_var(&mut self, var_ctx: &mut VarCtx) -> Result<Var, String> {
+  fn parse_var(&mut self) -> Result<Var, String> {
     let name = self.parse_name()?;
-    Ok(
-      *self
-        .var_lookup
-        .entry(name)
-        .or_insert_with_key(|name| var_ctx.vars.push(VarInfo { name: name.clone(), uses: vec![] })),
-    )
+    Ok(*self.vars.lookup.entry(name).or_insert_with(|| self.vars.scope.push(name.to_owned(), Some(VarInfo::default()))))
   }
 
-  fn parse_lt_decl(&mut self, lt_ctx: &mut LifetimeCtx, side: Side) -> Result<Lifetime, String> {
+  fn parse_lt_decl(&mut self, side: Side) -> Result<Lifetime, String> {
     let start = self.index;
-    let name = self.parse_lt_name()?;
+    let lt = self.parse_lt()?;
     let side = side ^ self.try_consume("?");
     let end = self.index;
-    let lt = *self.lt_lookup.entry(name).or_insert_with_key(|name| lt_ctx.intro(format!("'{name}"), side));
-    if lt_ctx.lifetimes[lt].side != side {
+    let info = self.lifetimes.scope.or_define(lt, || LifetimeInfo { side, min: None, max: None });
+    if info.side != side {
       Err(format!(
-        "inconsistent known/unknown modifiers on lifetime `'{}`:\n{}",
-        lt_ctx.lifetimes[lt].name,
-        highlight_error(start, end, self.input()),
+        "inconsistent external/internal modifiers on lifetime `{}`:\n{}",
+        self.lifetimes.scope.name(lt),
+        highlight_error(start, end, self.input),
       ))?
     }
     Ok(lt)
   }
 
   fn parse_lt(&mut self) -> Result<Lifetime, String> {
+    self.skip_trivia();
     let start = self.index;
-    let name = self.parse_lt_name()?;
-    let end = self.index;
-    Ok(
-      self
-        .lt_lookup
-        .get(&name)
-        .copied()
-        .ok_or_else(|| format!("unknown lifetime `'{name}`:\n{}", highlight_error(start, end, self.input())))?,
-    )
-  }
-
-  fn parse_lt_name(&mut self) -> Result<String, String> {
     self.consume("'")?;
-    self.parse_name()
+    self.take_while(Self::is_name_char);
+    let name = &self.input[start..self.index];
+    if name.len() <= 1 {
+      self.expected("lifetime name")
+    } else {
+      Ok(self.lifetimes.get(name))
+    }
   }
 
   fn try_consume(&mut self, str: &str) -> bool {
@@ -268,6 +246,20 @@ impl<'i> Parser<'i> {
       false
     }
   }
+
+  fn parse_name(&mut self) -> Result<&'i str, String> {
+    self.skip_trivia();
+    let name = self.take_while(Self::is_name_char);
+    if name.is_empty() {
+      self.expected("name")
+    } else {
+      Ok(name)
+    }
+  }
+
+  fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_.-/$".contains(c)
+  }
 }
 
 impl FromStr for Program {
@@ -277,10 +269,10 @@ impl FromStr for Program {
     Parser {
       input,
       index: 0,
-      type_lookup: Default::default(),
-      lt_lookup: Default::default(),
-      agent_lookup: Default::default(),
-      var_lookup: Default::default(),
+      types: ScopeBuilder::default(),
+      components: ScopeBuilder::default(),
+      lifetimes: ScopeBuilder::default(),
+      vars: ScopeBuilder::default(),
     }
     .parse_file()
   }

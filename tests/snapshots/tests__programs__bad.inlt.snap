@@ -1,0 +1,27 @@
+---
+source: tests/check.rs
+input_file: tests/programs/bad.inlt
+---
+errors:
+  duplicate definition of type `X`
+  in agent `Foo`:
+    previous error in type `X`
+    undefined lifetime `'a`
+  in agent `Foo`:
+    undefined type `Y`
+    undefined lifetime `'b`
+    undefined lifetime `'b`
+    duplicate definition of component `Foo`
+  in net `x`:
+    duplicate definition of component `x`
+  in agent `Bar`:
+    validity requires constraints not guaranteed:
+      'b < 'a
+  incoherent type order:
+    A < C < B < A
+  in net `foo`:
+    `AB` expects 2 ports but 3 were supplied
+    `BC` expects 2 ports but 1 were supplied
+    `z`: mismatched types `C` and `!A`
+    `c`: used only once
+    `a`: used more than twice

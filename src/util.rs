@@ -10,3 +10,10 @@ impl<F: Fn(&mut fmt::Formatter) -> fmt::Result> fmt::Display for DisplayFn<F> {
 
 pub trait Captures<T> {}
 impl<T, U> Captures<T> for U {}
+
+#[macro_export]
+macro_rules! display {
+  ($($x:tt)*) => {
+    $crate::util::DisplayFn(|f| write!(f, $($x)*))
+  };
+}

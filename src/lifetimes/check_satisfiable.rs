@@ -1,16 +1,16 @@
 use std::{borrow::Cow, fmt::Display};
 
 use super::{Lifetime, LifetimeCtx, Side};
-use crate::order::Order;
+use crate::{display, error::Error, order::Order};
 
 impl LifetimeCtx {
-  pub fn check_contract_satisfiable(&mut self, source: impl Display) -> Result<(), String> {
+  pub fn check_contract_satisfiable(&mut self) -> Result<(), Error> {
     for side in [Side::External, Side::Internal] {
-      self[side].check_acyclic(format_args!("impossible {side} constraints in {source}:"), self.show_lt())?;
+      self[side].check_coherent(self.show_lt()).report(format_args!("impossible {side} constraints:"))?;
     }
 
     for side in [Side::External, Side::Internal] {
-      self.populate_bounds(side, &source)?;
+      self.populate_bounds(side)?;
     }
 
     for side in [Side::External, Side::Internal] {
@@ -20,8 +20,8 @@ impl LifetimeCtx {
         Some(side),
         &self[other_side],
         &self[side],
-        format!("in {source}, satisfying {side} obligations would require impossible constraints:"),
-        format!("in {source}, satisfying {side} obligations is impossible without more {other_side} guarantees:",),
+        format_args!("satisfying {side} obligations would require incoherent constraints:"),
+        format_args!("satisfying {side} obligations is impossible without more {other_side} guarantees:",),
       )?;
     }
 
@@ -33,15 +33,13 @@ impl LifetimeCtx {
     side: Option<Side>,
     knows: &Order<Lifetime>,
     needs: &Order<Lifetime>,
-    source: impl Display,
-  ) -> Result<(), String> {
+  ) -> Result<(), Error> {
     #[allow(irrefutable_let_patterns)]
-    if let cycle_message = format_args!("validity of {source} requires impossible lifetime constraints:")
-      && let diff_message = format_args!("validity of {source} would require constraints not guaranteed:")
-    {
-      needs.check_acyclic(&cycle_message, self.show_lt())?;
-      self._check_satisfiable(side, knows, needs, cycle_message, diff_message)?;
-    }
+    let cycle_message = &display!("validity requires incoherent lifetime constraints:");
+    let diff_message = &display!("validity requires constraints not guaranteed:");
+
+    needs.check_coherent(self.show_lt()).report(cycle_message)?;
+    self._check_satisfiable(side, knows, needs, cycle_message, diff_message)?;
 
     Ok(())
   }
@@ -53,8 +51,8 @@ impl LifetimeCtx {
     needs: &Order<Lifetime>,
     cycle_message: impl Display,
     diff_message: impl Display,
-  ) -> Result<(), String> {
-    needs.check_acyclic(&cycle_message, self.show_lt())?;
+  ) -> Result<(), Error> {
+    needs.check_coherent(self.show_lt()).report(&cycle_message)?;
 
     let mut new_knows = Cow::Borrowed(knows);
     let mut problems = Order::default();
@@ -68,38 +66,10 @@ impl LifetimeCtx {
     }
 
     if matches!(new_knows, Cow::Owned(_)) {
-      new_knows.check_acyclic(cycle_message, self.show_lt())?;
+      new_knows.check_coherent(self.show_lt()).report(&cycle_message)?;
     }
 
-    if let Err(mut err) = problems.verify_empty(diff_message, self.show_lt()) {
-      use std::fmt::Write;
-
-      write!(&mut err, "\n\nwe know:").unwrap();
-
-      for lt in self.lifetimes.values() {
-        if Some(lt.side) != side {
-          write!(&mut err, " {}", lt.name).unwrap();
-        }
-      }
-
-      for (a, b, rel) in knows.iter_forward() {
-        write!(&mut err, "\n  {} {rel:?} {}", self.show_lt()(a), self.show_lt()(b)).unwrap();
-      }
-
-      write!(&mut err, "\n\nwe need:").unwrap();
-
-      for lt in self.lifetimes.values() {
-        if Some(lt.side) == side {
-          write!(&mut err, " {}", lt.name).unwrap();
-        }
-      }
-
-      for (a, b, rel) in needs.iter_forward() {
-        write!(&mut err, "\n  {} {rel:?} {}", self.show_lt()(a), self.show_lt()(b)).unwrap();
-      }
-
-      Err(err)?
-    }
+    problems.verify_empty(self.show_lt()).report(diff_message)?;
 
     Ok(())
   }

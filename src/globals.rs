@@ -1,40 +1,35 @@
 use crate::{
-  index_vec::IndexVec,
   lifetimes::{Lifetime, LifetimeCtx},
   new_index,
+  order::Order,
+  scope::Scope,
 };
 use std::{fmt::Debug, ops::Not};
 
 #[derive(Debug, Clone, Default)]
 pub struct GlobalCtx {
-  pub types: IndexVec<Type, TypeInfo>,
-  pub agents: IndexVec<Agent, AgentInfo>,
+  pub type_order: Order<Type>,
+  pub types: Scope<Type, TypeInfo>,
+  pub components: Scope<Component, ComponentInfo>,
 }
 
-new_index!(pub Type);
+new_index!(pub Type "type");
 
 #[derive(Debug, Clone)]
 pub struct TypeInfo {
-  pub name: String,
+  pub polarity: Polarity,
 }
 
-new_index!(pub Agent);
+new_index!(pub Component "component");
 
 #[derive(Debug, Clone)]
-pub struct AgentInfo {
-  pub name: String,
+pub struct ComponentInfo {
   pub lt_ctx: LifetimeCtx,
   pub ports: Vec<PortLabel>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PortLabel(pub Type, pub Lifetime);
-
-impl GlobalCtx {
-  pub fn show_type<'a>(&'a self) -> impl Fn(Type) -> &'a str {
-    |ty| &self.types[ty].name
-  }
-}
 
 impl Not for Type {
   type Output = Type;
@@ -60,16 +55,8 @@ impl Not for Polarity {
     }
   }
 }
-impl Type {
-  pub fn polarity(&self) -> Polarity {
-    match self.0 & 1 {
-      0 => Polarity::Pos,
-      _ => Polarity::Neg,
-    }
-  }
-}
 
-impl Debug for Agent {
+impl Debug for Component {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     write!(f, "A{}", self.0)
   }
@@ -83,7 +70,7 @@ impl Debug for PortLabel {
 
 impl Debug for Type {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{:?}{}", self.polarity(), self.0 / 2)
+    write!(f, "{}{}", if self.0 & 1 == 1 { "!" } else { "" }, self.0 / 2)
   }
 }
 
