@@ -76,7 +76,7 @@ impl Debug for Relation {
       Relation::GE => f.write_str(">="),
       Relation::GT => f.write_str(">"),
       Relation::EQ => f.write_str("=="),
-      _ => write!(f, "{:?} & {:?}", self.lte_component(), self.gte_component()),
+      _ => write!(f, "{:?} & {:?}", self.lte_component().unwrap(), self.gte_component().unwrap()),
     }
   }
 }
