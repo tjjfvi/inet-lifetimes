@@ -107,7 +107,7 @@ impl RuleDef {
     let mut errors = ErrorGroup::default();
 
     let a_name = globals.components.name(self.a.component);
-    let b_name = globals.components.name(self.a.component);
+    let b_name = globals.components.name(self.b.component);
     let ctx = &display!("in rule `{a_name}-{b_name}`:");
 
     if self.a.ports[0] != self.b.ports[0] {
